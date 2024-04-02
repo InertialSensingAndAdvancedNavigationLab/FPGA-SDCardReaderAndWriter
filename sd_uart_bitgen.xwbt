@@ -1,8 +1,0 @@
-INTSTYLE=ise
-INFILE=D:\FPGA\sd_card\sd_uart.ncd
-OUTFILE=D:\FPGA\sd_card\sd_uart.bit
-FAMILY=Spartan3A and Spartan3AN
-PART=xc3s400an-5ftg256
-WORKINGDIR=D:\FPGA\sd_card
-LICENSE=WebPack
-USER_INFO=__0_0_0
