@@ -1,0 +1,9 @@
+
+# PlanAhead Generated physical constraints 
+
+NET "sd_cs_n" LOC = C7;
+NET "sd_miso" LOC = C12;
+NET "sys_clk" LOC = C13;
+NET "sd_mosi" LOC = C10;
+NET "rx" LOC = C6;
+NET "sd_clk" LOC = C2;

@@ -1,0 +1,4 @@
+verilog work "src/uart_tx.v"
+verilog work "ipcore_dir/wr_fifo.v"
+verilog work "src/WriteSDCardByUART.v"
+verilog work "src/sd_uart.v"

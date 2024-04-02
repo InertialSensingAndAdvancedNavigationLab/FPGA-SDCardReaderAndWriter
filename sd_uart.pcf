@@ -1,0 +1,13 @@
+//! **************************************************************************
+// Written by: Map P.20131013 on Tue Apr 02 21:43:35 2024
+//! **************************************************************************
+
+SCHEMATIC START;
+COMP "rx" LOCATE = SITE "C6" LEVEL 1;
+COMP "sd_cs_n" LOCATE = SITE "C7" LEVEL 1;
+COMP "sd_miso" LOCATE = SITE "C12" LEVEL 1;
+COMP "sd_mosi" LOCATE = SITE "C10" LEVEL 1;
+COMP "sys_clk" LOCATE = SITE "C13" LEVEL 1;
+COMP "sd_clk" LOCATE = SITE "C2" LEVEL 1;
+SCHEMATIC END;
+

@@ -689,24 +689,16 @@ module SDDataWriter (
   //********************************************************************//
   //------------- fifo_wr_data_inst -------------
   wr_fifo fifo_wr_data_inst (
-      .rst   (~sys_rst_n),  //??��
-      .wr_clk(sys_clk),     //????��?????????
-      .wr_en (rx_flag),     //????��?????????
-      .din   (rx_data),     //��??????
-
-      .full         (),
-      .empty        (),
-      .rd_clk       (sys_clk),          //??????????????
-      .rd_en        (wr_req),           //??????????????
-      .dout         (wr_data),          //????????
-      .rd_data_count(wr_fifo_data_num)  //fifo??????????????????
-  );
-  ila_0 FIFODebug (
-      .clk   (sys_clk),
-      .probe0(~sys_rst_n),
-      .probe1(sys_clk),     //SD卡时钟信�????
-      .probe2(rx_flag),     //片�?�信�????
-      .probe3(wr_req)
+      .rst(~sys_rst_n),  // input rst
+      .wr_clk(sys_clk),  // input wr_clk
+      .rd_clk(sys_clk),  // input rd_clk
+      .din(rx_data),  // input [7 : 0] din
+      .wr_en(rx_flag),  // input wr_en
+      .rd_en(wr_req),  // input rd_en
+      .dout(wr_data),  // output [7 : 0] dout
+      .full(),  // output full
+      .empty(),  // output empty
+      .rd_data_count(wr_fifo_data_num)  // output [10 : 0] rd_data_count
   );
   Write_sd_Control SDControl (
       .sys_clk  (sys_clk),   //?????????,???50MHz
