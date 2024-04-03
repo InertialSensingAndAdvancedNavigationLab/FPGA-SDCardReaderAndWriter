@@ -23,13 +23,18 @@
 
   <files xmlns="http://www.xilinx.com/XMLSchema">
     <file xil_pn:fileType="FILE_DIRECTORY" xil_pn:name="_ngo"/>
+    <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/bitgen.xmsgs"/>
     <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/map.xmsgs"/>
     <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/ngdbuild.xmsgs"/>
     <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/par.xmsgs"/>
+    <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/trce.xmsgs"/>
     <file xil_pn:fileType="FILE_XMSGS" xil_pn:name="_xmsgs/xst.xmsgs"/>
     <file xil_pn:fileType="FILE_DIRECTORY" xil_pn:name="planAhead_run_1"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_BITGEN_REPORT" xil_pn:name="sd_uart.bgn" xil_pn:subbranch="FPGAConfiguration"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_BIT" xil_pn:name="sd_uart.bit" xil_pn:subbranch="FPGAConfiguration"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_NGDBUILD_LOG" xil_pn:name="sd_uart.bld"/>
     <file xil_pn:fileType="FILE_CMD_LOG" xil_pn:name="sd_uart.cmd_log"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_BITGEN_DRC" xil_pn:name="sd_uart.drc" xil_pn:subbranch="FPGAConfiguration"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_LSO" xil_pn:name="sd_uart.lso"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_NCD" xil_pn:name="sd_uart.ncd" xil_pn:subbranch="Par"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_NGC" xil_pn:name="sd_uart.ngc"/>
@@ -39,9 +44,13 @@
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_PAR_REPORT" xil_pn:name="sd_uart.par" xil_pn:subbranch="Par"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_PCF" xil_pn:name="sd_uart.pcf" xil_pn:subbranch="Map"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_XST_PROJECT" xil_pn:name="sd_uart.prj"/>
+    <file xil_pn:fileType="FILE_TRCE_MISC" xil_pn:name="sd_uart.ptwx"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_XST_STX" xil_pn:name="sd_uart.stx"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_XST_REPORT" xil_pn:name="sd_uart.syr"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_TIMING_TXT_REPORT" xil_pn:name="sd_uart.twr" xil_pn:subbranch="Par"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_TIMING_XML_REPORT" xil_pn:name="sd_uart.twx" xil_pn:subbranch="Par"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_UNROUTES" xil_pn:name="sd_uart.unroutes" xil_pn:subbranch="Par"/>
+    <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_BITGEN_REPORT" xil_pn:name="sd_uart.ut" xil_pn:subbranch="FPGAConfiguration"/>
     <file xil_pn:fileType="FILE_XPI" xil_pn:name="sd_uart.xpi"/>
     <file xil_pn:branch="Implementation" xil_pn:fileType="FILE_XST" xil_pn:name="sd_uart.xst"/>
     <file xil_pn:fileType="FILE_HTML" xil_pn:name="sd_uart_envsettings.html"/>
@@ -59,6 +68,8 @@
     <file xil_pn:fileType="FILE_FITTER_REPORT" xil_pn:name="sd_uart_summary.xml"/>
     <file xil_pn:fileType="FILE_WEBTALK" xil_pn:name="sd_uart_usage.xml"/>
     <file xil_pn:fileType="FILE_XRPT" xil_pn:name="sd_uart_xst.xrpt"/>
+    <file xil_pn:fileType="FILE_HTML" xil_pn:name="usage_statistics_webtalk.html"/>
+    <file xil_pn:fileType="FILE_LOG" xil_pn:name="webtalk.log"/>
     <file xil_pn:fileType="FILE_FITTER_REPORT" xil_pn:name="webtalk_pn.xml"/>
     <file xil_pn:fileType="FILE_DIRECTORY" xil_pn:name="xlnx_auto_0_xdb"/>
     <file xil_pn:fileType="FILE_DIRECTORY" xil_pn:name="xst"/>
@@ -95,7 +106,7 @@
       <status xil_pn:value="SuccessfullyRun"/>
       <status xil_pn:value="ReadyToRun"/>
     </transform>
-    <transform xil_pn:end_ts="1712065410" xil_pn:in_ck="1579040375746063196" xil_pn:name="TRANEXT_xstsynthesize_spartan3e" xil_pn:prop_ck="3511707031019291216" xil_pn:start_ts="1712065405">
+    <transform xil_pn:end_ts="1712118198" xil_pn:in_ck="1579040375746063196" xil_pn:name="TRANEXT_xstsynthesize_spartan3e" xil_pn:prop_ck="3511707031019291216" xil_pn:start_ts="1712118192">
       <status xil_pn:value="SuccessfullyRun"/>
       <status xil_pn:value="WarningsGenerated"/>
       <status xil_pn:value="ReadyToRun"/>
@@ -113,24 +124,25 @@
       <outfile xil_pn:name="webtalk_pn.xml"/>
       <outfile xil_pn:name="xst"/>
     </transform>
-    <transform xil_pn:end_ts="1712065410" xil_pn:in_ck="180911456795346654" xil_pn:name="TRAN_compileBCD2" xil_pn:prop_ck="1262981282494465748" xil_pn:start_ts="1712065410">
+    <transform xil_pn:end_ts="1712118202" xil_pn:in_ck="180911456795346654" xil_pn:name="TRAN_compileBCD2" xil_pn:prop_ck="1262981282494465748" xil_pn:start_ts="1712118202">
       <status xil_pn:value="SuccessfullyRun"/>
       <status xil_pn:value="ReadyToRun"/>
     </transform>
-    <transform xil_pn:end_ts="1712065412" xil_pn:in_ck="7071173881547725271" xil_pn:name="TRANEXT_ngdbuild_FPGA" xil_pn:prop_ck="1003961735204075808" xil_pn:start_ts="1712065410">
+    <transform xil_pn:end_ts="1712118204" xil_pn:in_ck="7071173881547725271" xil_pn:name="TRANEXT_ngdbuild_FPGA" xil_pn:prop_ck="1003961735204075808" xil_pn:start_ts="1712118202">
       <status xil_pn:value="SuccessfullyRun"/>
+      <status xil_pn:value="WarningsGenerated"/>
       <status xil_pn:value="ReadyToRun"/>
-      <status xil_pn:value="OutOfDateForOutputs"/>
-      <status xil_pn:value="OutputChanged"/>
       <outfile xil_pn:name="_ngo"/>
       <outfile xil_pn:name="_xmsgs/ngdbuild.xmsgs"/>
       <outfile xil_pn:name="sd_uart.bld"/>
       <outfile xil_pn:name="sd_uart.ngd"/>
       <outfile xil_pn:name="sd_uart_ngdbuild.xrpt"/>
     </transform>
-    <transform xil_pn:end_ts="1712065415" xil_pn:in_ck="6023741422839176919" xil_pn:name="TRANEXT_map_spartan3" xil_pn:prop_ck="-6334426885146266031" xil_pn:start_ts="1712065412">
+    <transform xil_pn:end_ts="1712118206" xil_pn:in_ck="6023741422839176919" xil_pn:name="TRANEXT_map_spartan3" xil_pn:prop_ck="-6334426885146266031" xil_pn:start_ts="1712118204">
       <status xil_pn:value="SuccessfullyRun"/>
       <status xil_pn:value="ReadyToRun"/>
+      <status xil_pn:value="OutOfDateForOutputs"/>
+      <status xil_pn:value="OutputChanged"/>
       <outfile xil_pn:name="_xmsgs/map.xmsgs"/>
       <outfile xil_pn:name="sd_uart.pcf"/>
       <outfile xil_pn:name="sd_uart_map.map"/>
@@ -141,19 +153,46 @@
       <outfile xil_pn:name="sd_uart_summary.xml"/>
       <outfile xil_pn:name="sd_uart_usage.xml"/>
     </transform>
-    <transform xil_pn:end_ts="1712065419" xil_pn:in_ck="4937205793607875664" xil_pn:name="TRANEXT_par_spartan3" xil_pn:prop_ck="1630648938267686031" xil_pn:start_ts="1712065415">
-      <status xil_pn:value="FailedRun"/>
-      <status xil_pn:value="WarningsGenerated"/>
+    <transform xil_pn:end_ts="1712118214" xil_pn:in_ck="4937205793607875664" xil_pn:name="TRANEXT_par_spartan3" xil_pn:prop_ck="1630648938267686031" xil_pn:start_ts="1712118206">
+      <status xil_pn:value="SuccessfullyRun"/>
       <status xil_pn:value="ReadyToRun"/>
       <outfile xil_pn:name="_xmsgs/par.xmsgs"/>
       <outfile xil_pn:name="sd_uart.ncd"/>
       <outfile xil_pn:name="sd_uart.pad"/>
       <outfile xil_pn:name="sd_uart.par"/>
+      <outfile xil_pn:name="sd_uart.ptwx"/>
       <outfile xil_pn:name="sd_uart.unroutes"/>
       <outfile xil_pn:name="sd_uart.xpi"/>
       <outfile xil_pn:name="sd_uart_pad.csv"/>
       <outfile xil_pn:name="sd_uart_pad.txt"/>
       <outfile xil_pn:name="sd_uart_par.xrpt"/>
+    </transform>
+    <transform xil_pn:end_ts="1712118224" xil_pn:in_ck="180911456795339029" xil_pn:name="TRANEXT_bitFile_spartan3a" xil_pn:prop_ck="8242823369169169445" xil_pn:start_ts="1712118218">
+      <status xil_pn:value="SuccessfullyRun"/>
+      <status xil_pn:value="ReadyToRun"/>
+      <outfile xil_pn:name="_xmsgs/bitgen.xmsgs"/>
+      <outfile xil_pn:name="sd_uart.bgn"/>
+      <outfile xil_pn:name="sd_uart.bit"/>
+      <outfile xil_pn:name="sd_uart.drc"/>
+      <outfile xil_pn:name="sd_uart.ut"/>
+      <outfile xil_pn:name="usage_statistics_webtalk.html"/>
+      <outfile xil_pn:name="webtalk.log"/>
+      <outfile xil_pn:name="webtalk_pn.xml"/>
+    </transform>
+    <transform xil_pn:end_ts="1712118508" xil_pn:in_ck="180911456795326175" xil_pn:name="TRAN_configureTargetDevice" xil_pn:prop_ck="3725548802311211136" xil_pn:start_ts="1712118507">
+      <status xil_pn:value="SuccessfullyRun"/>
+      <status xil_pn:value="ReadyToRun"/>
+    </transform>
+    <transform xil_pn:end_ts="1712118259" xil_pn:in_ck="180911456795326175" xil_pn:name="TRAN_analyzeDesignUsingChipscope" xil_pn:prop_ck="1003961735204075808" xil_pn:start_ts="1712118259">
+      <status xil_pn:value="SuccessfullyRun"/>
+      <status xil_pn:value="ReadyToRun"/>
+    </transform>
+    <transform xil_pn:end_ts="1712118214" xil_pn:in_ck="-647816636972762925" xil_pn:name="TRAN_postRouteTrce" xil_pn:prop_ck="445577401284416187" xil_pn:start_ts="1712118213">
+      <status xil_pn:value="SuccessfullyRun"/>
+      <status xil_pn:value="ReadyToRun"/>
+      <outfile xil_pn:name="_xmsgs/trce.xmsgs"/>
+      <outfile xil_pn:name="sd_uart.twr"/>
+      <outfile xil_pn:name="sd_uart.twx"/>
     </transform>
   </transforms>
 
