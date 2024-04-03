@@ -6,5 +6,6 @@ NET "sd_miso" LOC = E13;
 NET "sd_mosi" LOC = F13;
 NET "rx" LOC = C6;
 NET "sd_clk" LOC = H13;
+NET "sys_rst_n" LOC = G3;
 NET "sys_clk" LOC = N9 | IOSTANDARD = LVCMOS33;
-TIMESPEC TS_clk = PERIOD "clk" 10 ns HIGH 50%;
+TIMESPEC TS_clk = PERIOD "sys_clk" 10 ns HIGH 50%;
