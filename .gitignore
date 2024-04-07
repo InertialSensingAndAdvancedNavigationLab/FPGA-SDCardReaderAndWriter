@@ -1,0 +1,9 @@
+*
+!libs
+!src
+!Doxyfile
+!makefile
+!Readme.md
+!sd_uart.ucf
+!sd_card.xise
+!sd_card.gise
