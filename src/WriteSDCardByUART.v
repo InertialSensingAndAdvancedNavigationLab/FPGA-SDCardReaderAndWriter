@@ -66,8 +66,8 @@ module WriteSDCardByUART (
   SDUartTX DebugTxOutput (
       .sys_clk  (sys_clk),    //input             sys_clk
       .sys_rst_n(sys_rst_n),  //input             sys_rst_n
-      .pi_data  (rx_data),    //input     [7:0]   pi_data
-      .pi_flag  (rx_flag),    //input             pi_flag
+      .pi_data  (wr_data),    //input     [7:0]   pi_data
+      .pi_flag  (wr_en),    //input             pi_flag
 
       .tx(tx)  //output            tx
   );
