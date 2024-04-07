@@ -1,4 +1,4 @@
-module SD_uart_rx #(
+module SDUartRX #(
     parameter UART_BPS = 'd921600,     //?????????
     parameter CLK_FREQ = 'd20_000_000  //??????
 ) (
