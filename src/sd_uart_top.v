@@ -1,6 +1,4 @@
-`timescale  1ns/1ns
-
-module  sd_uart
+module  sd_uart_top
 (
     input  wire Button,
     input   wire            sys_clk     ,   //输入工作时钟,频率50MHz
