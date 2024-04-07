@@ -1,0 +1,13 @@
+run
+-ifmt VHDL
+-ent wr_fifo_exdes 
+-p xc3s1400a-fg676-4
+-ifn xst.prj
+-write_timing_constraints No
+-iobuf YES
+-max_fanout 100
+-ofn wr_fifo_exdes 
+-ofmt NGC
+-bus_delimiter ()
+-hierarchy_separator /
+-case Maintain
