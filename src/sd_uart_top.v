@@ -1,28 +1,27 @@
-module  sd_uart_top
-(
-    input  wire Button,
-    input   wire            sys_clk     ,   //杈撳叆宸ヤ綔鏃堕挓,棰戠巼50MHz
-    inout   wire            sys_rst_n   ,   //杈撳叆澶嶄綅淇″彿,浣庣數骞虫湁锟????
-    input   wire            rx          ,   //涓插彛鍙戯拷?锟芥暟锟????
-    input   wire            sd_miso     ,   //涓昏緭鍏ヤ粠杈撳嚭淇″彿
 
-    output  wire            sd_clk      ,   //SD鍗℃椂閽熶俊锟????
-    output  wire            sd_cs_n     ,   //鐗囷拷?锟戒俊锟????
-    output  wire            sd_mosi     ,   //涓昏緭鍑轰粠杈撳叆淇″彿
-        output  wire            tx              //涓插彛鎺ユ敹鏁版嵁
+module  sd_uart
+(
+    input   wire            sys_clk     ,   //输入工作时钟,频率50MHz
+    input   wire            uart_rxd          ,   //串口发???数???
+    input   wire            sd_miso     ,   //主输入从输出信号
+
+    output  wire            sd_clk      ,   //SD卡时钟信???
+    output  wire            sd_cs_n     ,   //片???信???
+    output  wire            sd_mosi     ,   //主输出从输入信号
+        output  wire            uart_txd              //串口接收数据
 
 );
 WriteSDCardByUART uart_tx_inst
 (
-    .sys_clk     (sys_clk),   //杈撳叆宸ヤ綔鏃堕挓,棰戠巼50MHz
-    .sys_rst   (~sys_rst_n),   //杈撳叆澶嶄綅淇″彿,浣庣數骞虫湁锟????
-   .rx          (rx),   //涓插彛鍙戯拷?锟芥暟锟????
-    .sd_miso     (sd_miso),   //涓昏緭鍏ヤ粠杈撳嚭淇″彿
+    .sys_clk     (sys_clk),   //输入工作时钟,频率50MHz
+    .sys_rst   (1'b0),   //输入复位信号,低电平有???
+   .rx          (uart_rxd),   //串口发???数???
+    .sd_miso     (sd_miso),   //主输入从输出信号
 
-    .sd_clk      (sd_clk),   //SD鍗℃椂閽熶俊锟????
-    .sd_cs_n     (sd_cs_n),   //鐗囷拷?锟戒俊锟????
-    .sd_mosi    (sd_mosi)   , //涓昏緭鍑轰粠杈撳叆淇″彿
-    .tx (tx)
+    .sd_clk      (sd_clk),   //SD卡时钟信???
+    .sd_cs_n     (sd_cs_n),   //片???信???
+    .sd_mosi    (sd_mosi)   , //主输出从输入信号
+    .tx (uart_txd)
 );
 
 endmodule

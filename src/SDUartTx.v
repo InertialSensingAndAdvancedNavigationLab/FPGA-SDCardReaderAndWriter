@@ -1,7 +1,6 @@
-`timescale  1ns/1ns
 ////////////////////////////////////////////////////////////////////////
 // Author        : EmbedFire
-// 实验平台: 野火FPGA系列�?发板
+// 实验平台: 野火FPGA系列�发板
 // 公司    : http://www.embedfire.com
 // 论坛    : http://www.firebbs.cn
 // 淘宝    : https://fire-stm32.taobao.com
@@ -9,16 +8,16 @@
 
 module  SDUartTX
 #(
-    parameter   UART_BPS    =   'd921600,         //串口波特�?
+    parameter   UART_BPS    =   'd921600,         //串口波特�
     parameter   CLK_FREQ    =   'd20_000_000    //时钟频率
 )
 (
      input   wire            sys_clk     ,   //系统时钟50MHz
      input   wire            sys_rst_n   ,   //全局复位
-     input   wire    [7:0]   pi_data     ,   //模块输入�?8bit数据
+     input   wire    [7:0]   pi_data     ,   //模块输入�8bit数据
      input   wire            pi_flag     ,   //并行数据有效标志信号
  
-     output  reg             tx              //串转并后�?1bit数据
+     output  reg             tx              //串转并后�1bit数据
 );
 
 //********************************************************************//
@@ -54,7 +53,7 @@ always@(posedge sys_clk or negedge sys_rst_n)
         else    if(work_en == 1'b1)
             baud_cnt <= baud_cnt + 1'b1;
 
-//bit_flag:当baud_cnt计数器计数到1时让bit_flag拉高�?个时钟的高电�?
+//bit_flag:当baud_cnt计数器计数到1时让bit_flag拉高�个时钟的高电�
 always@(posedge sys_clk or negedge sys_rst_n)
         if(sys_rst_n == 1'b0)
             bit_flag <= 1'b0;
@@ -63,7 +62,7 @@ always@(posedge sys_clk or negedge sys_rst_n)
         else
             bit_flag <= 1'b0;
 
-//bit_cnt:数据位数个数计数�?10个有效数据（含起始位和停止位）到来后计数器清�?
+//bit_cnt:数据位数个数计数�10个有效数据（含起始位和停止位）到来后计数器清�
 always@(posedge sys_clk or negedge sys_rst_n)
     if(sys_rst_n == 1'b0)
         bit_cnt <= 4'b0;
@@ -72,7 +71,7 @@ always@(posedge sys_clk or negedge sys_rst_n)
     else    if((bit_flag == 1'b1) && (work_en == 1'b1))
         bit_cnt <= bit_cnt + 1'b1;
 
-//tx:输出数据在满足rs232协议（起始位�?0，停止位�?1）的情况下一位一位输�?
+//tx:输出数据在满足rs232协议（起始位�0，停止位�1）的情况下一位一位输�
 always@(posedge sys_clk or negedge sys_rst_n)
         if(sys_rst_n == 1'b0)
             tx <= 1'b1; //空闲状�?�时为高电平
