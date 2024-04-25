@@ -56,3 +56,26 @@ FIFO rst平时处于低电平状态
     - 不需要给与其一个下降沿，并且恢复至高电平的复位信号；
   - 即复位信号是非必要的。即便没有也能正常工作。
 - 时钟取反不影响工作
+
+## SDIO与SPI
+
+SPI工作模式下，使用引脚：
+
+| 网络名称 | 输入/输出 | 引脚 | 含义
+| --- | --- | --- | --- |
+|sd_clk|	output|	A16	|SD卡的时钟信号 |
+|sd_cs|	output	|A14 	|SD卡的片选信号 |
+|sd_miso|	input	|B17	|SD卡的数据发送管脚 |
+|sd_mosi|	output|	A15|	SD卡的数据接收管脚
+|sd_cd|	input	|A18|	SD卡插拔检测 |
+
+SDIO工作模式下，使用引脚：
+
+| 网络名称 | 输入/输出 | 引脚 | 含义
+| --- | --- | --- | --- |
+|sd_clk|	output|	A16	|SD卡的时钟信号
+|sd_cmd|	inout	|A15 	|SD卡的命令引脚
+|sd_data0|	inout	|B17	|SD卡的数据
+|sd_data1|	inout|	B18|	SD卡的数据
+|sd_data2|	inout	|A13|	SD卡的数据
+|sd_data2|	inout	|A14|	SD卡的数据
