@@ -6,7 +6,7 @@
 // Function: A SD-host to initialize SD-card and read sector
 //           Support CardType   : SDv1.1 , SDv2  or SDHCv2
 //--------------------------------------------------------------------------------------------------------
-
+//添加一个写入接口？
 module sd_reader # (
     parameter [2:0] CLK_DIV = 3'd2,     // when clk =   0~ 25MHz , set CLK_DIV = 3'd1,
                                         // when clk =  25~ 50MHz , set CLK_DIV = 3'd2,
@@ -70,6 +70,7 @@ localparam [3:0] CMD0      = 4'd0,
                  CMD3      = 4'd5,
                  CMD7      = 4'd6,
                  CMD16     = 4'd7,
+                 /// 单个块读
                  CMD17     = 4'd8,
                  READING   = 4'd9,
                  READING2  = 4'd10;

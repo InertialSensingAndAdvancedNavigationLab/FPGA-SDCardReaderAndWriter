@@ -70,3 +70,39 @@ module CountWithSpecifileInitiziton #(
     end
   end
 endmodule
+
+/**
+三态门数据线仲裁
+**/
+module wireSelector #(
+  /// 信号宽度
+  parameter wireWidth=1,
+  /// 需要选择的信号个数
+  parameter SelectorNumber=2,
+  /// 选择信号的位宽
+  parameter SelectorNumberWidth=1
+) (
+  /// 提供以进行选择的信号
+  inout wire [wireWidth*SelectorNumber-1:0] theProvideWire,
+  /// 选择的信号地址顺序
+  input wire [SelectorNumberWidth-1:0] selectorIndex,
+  /// 最终选择以连接的信号
+  inout wire [wireWidth-1:0]theSelectorWire
+);
+genvar index;
+  for ( index= 0;index< wireWidth; index=index+1) begin
+    assign theSelectorWire[index]=theProvideWire[(selectorIndex)*wireWidth+index];
+  end
+/*always @(*) begin
+  genvar index;
+  for ( index= 0;index< wireWidth; index=index+1) begin
+    
+  end
+  if(theProvideWire[selectorIndex]==1'bz)begin
+    theProvideWire[selectorIndex]<=theSelectorWire;
+  end
+  else begin
+    theSelectorWire <=theProvideWire[selectorIndex];
+  end
+end*/
+endmodule

@@ -60,4 +60,7 @@ module CreatelongFileName #(
     output reg [32*8-1:0]   theFAT32FileName
 );
     
+   always @(*) begin
+    //  theFAT32FileName[]
+  end
 endmodule
