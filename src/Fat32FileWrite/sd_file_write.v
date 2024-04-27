@@ -24,16 +24,16 @@ module sd_file_write #(
     parameter updateFileSystemSize='d1
 ) (
     // rstn active-low, 1:working, 0:reset
-    input  wire rstn,
+    input  wire       rstn,
     // clock
-    input  wire clk,
+    input  wire       clk,
     // SDcard signals (connect to SDcard), this design do not use sddat1~sddat3.
-    output wire sdclk,
-    inout       sdcmd,
-    inout  wire sddat0,  // FPGA only read SDDAT signal but never drive it
+    output wire       sdclk,
+    inout             sdcmd,
+    inout  wire       sddat0,  // FPGA only read SDDAT signal but never drive it
     // the input save data
-    input  wire rx,
-    output wire[3:0] ok
+    input  wire       rx,
+    output wire [3:0] ok
 );
 
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
@@ -48,7 +48,8 @@ module sd_file_write #(
   /// 初始化读BPR表得到系统数据
   initializeBPR = 'b0011,
   /// 初始化读BPR表得到系统数据完成
-  initializeBPRFinish = 'b0110, initializeFileSystem = 'b0111,
+  initializeBPRFinish = 'b0110, 
+  initializeFileSystem = 'b0111,
   /// 读取文件信息完成，同时也意味着SDIO控制权交给写模块
   initializeFileSystemFinish = 'b1000,
   /// 初始化彻底完成
@@ -88,7 +89,7 @@ module sd_file_write #(
   /// 
   wire [32*8-1:0] longFileName, shortFileName;
   /// 文件起始扇区
-  reg [32:0] fileStartSector;
+  reg  [32:0] fileStartSector;
   /// 
   wire [31:0] fileLength;
   /// SD接收数据线
@@ -169,7 +170,7 @@ module sd_file_write #(
   );
   /// SD卡状态
   wire [3:0] SDcardState;
-  wire [1:0]SDCardType;
+  wire [1:0] SDCardType;
   /// FileLength低10位始终为0，即FileLength为512的整数倍
   assign fileLength[9:0] = 10'b0000000000;
   /// 系统初始化状态机
@@ -189,9 +190,9 @@ module sd_file_write #(
         initializeSDIO: begin
           /// 当获取到了SD卡类型时，认为SDIO初始化完成
           /// 此时认为SDcartstate为ACMD41
-//          if (SDCardType > 2'd0) begin
-  /// SDcardState稳定状态位于8，CMD17
-            if (SDcardState == 4'd8) begin
+          //          if (SDCardType > 2'd0) begin
+          /// SDcardState稳定状态位于8，CMD17
+          if (SDcardState == 4'd8) begin
             workState <= initializeSDIOFinish;
             //SDIOReadWrite<=SDIORead;
           end
@@ -233,17 +234,18 @@ module sd_file_write #(
         initializeFileSystemFinish: begin
           /// 转让文件使用权
           //SDIOReadWrite<=SDIOWrite;
-          workState<=initializeFinish;
+          workState <= initializeFinish;
 
         end
         updateFileSystem: begin
-          
+
           //  sendData<=FileSaveDataBlock[blockAddress];
         end
         default: begin
           //workState   <= inReset;
         end
       endcase
+
     end  /// 系统工作
     /*
     else begin
@@ -265,18 +267,21 @@ module sd_file_write #(
   wire reciveEnd;
 
   /// 读模块所使用SDIO线，该线需要经过SDIOReadWrite仲裁决定
-  wire readSDClock;
-  wire readSDCMD;
   wire [0:0] readSDdata;
+
+  wire  [15:0] readCMDClockSpeed;
+  wire readCMDStart;
+  wire  [15:0] readCMDPrecnt;
+  wire  [ 5:0] readCMDOrderType;
+  wire [31:0] readCMDArgument;
   sd_reader #(
       .CLK_DIV(CLK_DIV)
   ) readAndInit (
       .rstn     (rstn),
       .clk      (clk),
-      .sdclk    (readSDClock),
-      .sdcmd    (readSDCMD),
+      .sdclk (sdclk),
       .sddat0   (readSDdata),
-      .card_type  ( SDCardType      ),
+      .card_type(SDCardType),
       .card_stat(SDcardState),
       .rstart   (readStart),
       .rsector  (readSectorAddress),
@@ -284,7 +289,17 @@ module sd_file_write #(
       .rdone    (reciveEnd),
       .outen    (inReciveData),
       .outaddr  (reciveDataAddress),
-      .outbyte  (reciveData)
+      .outbyte  (reciveData),
+      .clkdiv   (readCMDClockSpeed),
+      .start    (readCMDStart),
+      .precnt   (readCMDPrecnt),
+      .cmd      (readCMDOrderType),
+      .arg      (readCMDArgument),
+      .busy   (busy),
+      .done   (done),
+      .timeout(timeout),
+      .syntaxe(syntaxe),
+      .resparg (resparg)
   );
 
   /// 读BPR代码，工作条件：reciveData
@@ -362,43 +377,96 @@ module sd_file_write #(
   wire sendEnd;
 
   /// SDIO
-  wire writeSDClock;
-  wire writeSDCMD;
   wire [0:0] writeSDdata;
-  sd_reader #(
+  
+  /// SDIO线
+  wire  [15:0] writeCMDClockSpeed;
+  wire         writeCMDStart;
+  wire  [15:0] writeCMDPrecnt;
+  wire  [ 5:0] writeCMDOrderType;
+  wire  [31:0] writeCMDArgument;
+  sd_write #(
       .CLK_DIV(CLK_DIV)
   ) WriteAndUpdate (
-      .rstn     (rstn),
-      .clk      (clk),
-      .sdclk    (writeSDClock),
-      .sdcmd    (writeSDCMD),
-      .sddat0   (writeSDdata),
-      //    .card_type  ( card_type      ),
- //     .card_stat(SDcardState),
-      .rstart   (readStart),
-      .rsector  (readSectorAddress),
-      .rbusy    (),
-      .rdone    (sendEnd),
-      .outen    (reciveData),
-      .outaddr  (reciveDataAddress),
-      .outbyte  (reciveData)
+      .rstn   (rstn),
+      .clk    (clk),
+      .sdclk (sdclk),
+      .sddat0 (writeSDdata),
+      .rstart (readStart),
+      .writeSectorAddress(theRootDirectory+fileLength[31:10]),
+      .inbyte(reciveData),
+      .clkdiv (writeCMDClockSpeed),
+      .start  (writeCMDPrecnt),
+      .precnt (writeCMDStart),
+      .cmd    (writeCMDOrderType),
+      .arg    (writeCMDArgument),
+      .busy   (busy),
+      .done   (done),
+      .timeout(timeout),
+      .syntaxe(syntaxe),
+      .resparg (resparg)
   );
   /// SDIO总线总裁
   always @(*) begin
     sendData <= FileSaveDataBlock[blockAddress];
+        //  if (SDIOReadWrite == SDIORead) begin
+        SDCMDClockSpeed <= readCMDClockSpeed;
+        SDCMDStart <= readCMDStart;
+        SDCMDPrecnt <= readCMDPrecnt;
+        SDCMDOrderType <= readCMDOrderType;
+        SDCMDArgument <= readCMDArgument;
+   /*   end
+      else begin
+        SDCMDClockSpeed <= writeCMDClockSpeed;
+        SDCMDStart <= writeCMDStart;
+        SDCMDPrecnt <= writeCMDPrecnt;
+        SDCMDOrderType <= writeCMDOrderType;
+        SDCMDArgument <= writeCMDArgument;
+      end*/
   end
-  assign sdclk = SDIOReadWrite ? writeSDClock : readSDClock;  /*
-  assign sdcmd=readSDCMD;
-  assign sddat0=readSDdata;
-  */
-  wireSelector SDIOCMDSelector (
+  assign readSDdata=sddat0;//SDIOReadWrite?1'bz:sddat0;
+  
+  //assign sddat0=SDIOReadWrite?writeSDClock:1'bz;
+  //assign sdclk = SDIOReadWrite ? writeSDClock : readSDClock;  
+  //assign sdcmd=readSDCMD;
+  //assign sddat0=readSDdata;
+  /*
+  twoWireSelector SDIOCMDSelector (
       .theProvideWire ({writeSDCMD, readSDCMD}),
       .selectorIndex  (SDIOReadWrite),
       .theSelectorWire(sdcmd)
-  );
+  );/*
   wireSelector SDIODataSelector (
       .theProvideWire ({writeSDData, readSDdata}),
       .selectorIndex  (SDIOReadWrite),
       .theSelectorWire(sddat0)
+  );*/
+  /// SDIO线
+  reg  [15:0] SDCMDClockSpeed;
+  reg         SDCMDStart;
+  reg  [15:0] SDCMDPrecnt;
+  reg  [ 5:0] SDCMDOrderType;
+  reg  [31:0] SDCMDArgument;
+  wire        busy;
+  wire        done;
+  wire        timeout;
+  wire        syntaxe;
+  wire [31:0] resparg;
+  
+  sdcmd_ctrl SDIOCMD (
+      .rstn   (rstn),
+      .clk    (clk),
+      .sdclk  (sdclk),
+      .sdcmd  (sdcmd),
+      .clkdiv (SDCMDClockSpeed),
+      .start  (SDCMDStart),
+      .precnt (SDCMDPrecnt),
+      .cmd    (SDCMDOrderType),
+      .arg    (SDCMDArgument),
+      .busy   (busy),
+      .done   (done),
+      .timeout(timeout),
+      .syntaxe(syntaxe),
+      .resparg(resparg)
   );
 endmodule

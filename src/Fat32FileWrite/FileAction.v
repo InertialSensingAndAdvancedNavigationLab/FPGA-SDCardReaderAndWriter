@@ -88,11 +88,48 @@ module wireSelector #(
   input wire [SelectorNumberWidth-1:0] selectorIndex,
   /// 最终选择以连接的信号
   inout wire [wireWidth-1:0]theSelectorWire
-);
+);/*
 genvar index;
+genvar indexInGroup;
   for ( index= 0;index< wireWidth; index=index+1) begin
-    assign theSelectorWire[index]=theProvideWire[(selectorIndex)*wireWidth+index];
+    
+assign theSelectorWire[index]=theProvideWire[selectorIndex];
+
+  for ( indexInGroup= 0;indexInGroup<SelectorNumber; indexInGroup=indexInGroup+1) begin
+assign theProvideWire[indexInGroup*wireWidth+index]=(selectorIndex==indexInGroup)?theSelectorWire[index]:1'bz;
   end
+  end
+  
+/*always @(*) begin
+  genvar index;
+  for ( index= 0;index< wireWidth; index=index+1) begin
+    
+  end
+  if(theProvideWire[selectorIndex]==1'bz)begin
+    theProvideWire[selectorIndex]<=theSelectorWire;
+  end
+  else begin
+    theSelectorWire <=theProvideWire[selectorIndex];
+  end
+end*/
+endmodule
+
+
+/**
+三态门数据线仲裁
+**/
+module twoWireSelector #(
+) (
+  /// 提供以进行选择的信号
+  inout wire [1:0] theProvideWire,
+  /// 选择的信号地址顺序
+  input wire selectorIndex,
+  /// 最终选择以连接的信号
+  inout wire theSelectorWire
+);
+assign theSelectorWire=(selectorIndex==1'b1)?((theProvideWire[1]==1'bz)?1'bz:theProvideWire[1]):((theProvideWire[0]==1'bz)?1'bz:theProvideWire[0]);
+assign theProvideWire[0]=(selectorIndex==1'b1)?1'bz:theSelectorWire;
+assign theProvideWire[1]=(selectorIndex==1'b1)?theSelectorWire:1'bz;
 /*always @(*) begin
   genvar index;
   for ( index= 0;index< wireWidth; index=index+1) begin
