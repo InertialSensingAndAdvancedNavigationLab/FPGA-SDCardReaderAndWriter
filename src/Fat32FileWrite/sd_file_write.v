@@ -377,7 +377,7 @@ module sd_file_write #(
   wire sendEnd;
 
   /// SDIO
-  wire [0:0] writeSDdata;
+  wire [0:0] writeSDData;
   
   /// SDIO线
   wire  [15:0] writeCMDClockSpeed;
@@ -391,7 +391,7 @@ module sd_file_write #(
       .rstn   (rstn),
       .clk    (clk),
       .sdclk (sdclk),
-      .sddat0 (writeSDdata),
+      .sddat0 (writeSDData),
       .rstart (readStart),
       .writeSectorAddress(theRootDirectory+fileLength[31:10]),
       .inbyte(reciveData),
@@ -409,24 +409,24 @@ module sd_file_write #(
   /// SDIO总线总裁
   always @(*) begin
     sendData <= FileSaveDataBlock[blockAddress];
-        //  if (SDIOReadWrite == SDIORead) begin
+          if (SDIOReadWrite == SDIORead) begin
         SDCMDClockSpeed <= readCMDClockSpeed;
         SDCMDStart <= readCMDStart;
         SDCMDPrecnt <= readCMDPrecnt;
         SDCMDOrderType <= readCMDOrderType;
         SDCMDArgument <= readCMDArgument;
-   /*   end
+      end
       else begin
         SDCMDClockSpeed <= writeCMDClockSpeed;
         SDCMDStart <= writeCMDStart;
         SDCMDPrecnt <= writeCMDPrecnt;
         SDCMDOrderType <= writeCMDOrderType;
         SDCMDArgument <= writeCMDArgument;
-      end*/
+      end
   end
-  assign readSDdata=sddat0;//SDIOReadWrite?1'bz:sddat0;
-  
-  //assign sddat0=SDIOReadWrite?writeSDClock:1'bz;
+  assign readSDdata=SDIOReadWrite?1'bz:sddat0;
+  assign sddat0=SDIOReadWrite?writeSDData:1'bz;
+
   //assign sdclk = SDIOReadWrite ? writeSDClock : readSDClock;  
   //assign sdcmd=readSDCMD;
   //assign sddat0=readSDdata;
