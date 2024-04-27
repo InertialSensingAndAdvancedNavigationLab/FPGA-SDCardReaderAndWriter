@@ -5,6 +5,7 @@
 // Standard: Verilog 2001 (IEEE1364-2001)
 // Function: A SD-host to initialize SD-card and read sector
 //           Support CardType   : SDv1.1 , SDv2  or SDHCv2
+// 单块写入
 //--------------------------------------------------------------------------------------------------------
 
 module sd_write #(
@@ -21,22 +22,25 @@ module sd_write #(
     input wire clk,
     // SDcard signals (connect to SDcard), this design do not use sddat1~sddat3.
     input wire sdclk,
-    input wire sddat0,  // FPGA only read SDDAT signal but never drive it
-    input wire rstart,
-    input wire [31:0] writeSectorAddress,
+    output reg sddat0,  // FPGA only read SDDAT signal but never drive it
     output wire rbusy,
-    output wire writeDone,
     // sector data output interface (sync with clk)
     output reg outen,  // when outen=1, a byte of sector content is read out from outbyte
     output reg [8:0] outaddr,  // outaddr from 0 to 511, because the sector size is 512
     input wire inEnable,
-    input wire [7:0] inbyte,  // a byte of sector content
     output reg [7:0] outbyte,  // a byte of sector content
     output wire byteDone,
     // show card status
     output wire [3:0] card_stat,  // show the sdcard initialize status
     output reg [1:0] card_type,  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
-    input wire [31:0] rsector,
+    input wire [31:0] writeSectorAddress,
+    /// Write
+    input wire StartWrite,
+    input wire inEnable,
+    input wire [7:0] inbyte,  // a byte of sector content
+    output reg writeByteSuccess,
+    output reg writeBlockFinish,
+    /// SDCMD
     output reg [15:0] clkdiv,
     output reg start,
     output reg [15:0] precnt,
@@ -62,7 +66,7 @@ module sd_write #(
   reg [ 5:0] cmd = 0;
   reg [31:0] arg = 0;
   reg [15:0] clkdiv = SLOWCLKDIV;
-  reg [31:0] rsectoraddr = 0;
+  reg [31:0] theWriteSectorAddress = 0;
 
 
   reg        sdv1_maybe = 1'b0;
@@ -77,25 +81,31 @@ module sd_write #(
                  CMD3      = 4'd5,
                  CMD7      = 4'd6,
                  CMD16     = 4'd7,
-                 CMD17     = 4'd8,
-                 READING   = 4'd9,
-                 READING2  = 4'd10;
+                 /// 等待命令状态
+                 waitOrder     = 4'd8,
+                 prepareWrite   = 4'd9,
+                 inWritting  = 4'd10;
 
   reg [3:0] sdcmd_stat = CMD0;
-  //enum logic [3:0] {CMD0, CMD8, CMD55_41, ACMD41, CMD2, CMD3, CMD7, CMD16, CMD17, READING, READING2} sdcmd_stat = CMD0;
+  //enum logic [3:0] {CMD0, CMD8, CMD55_41, ACMD41, CMD2, CMD3, CMD7, CMD16, waitOrder, prepareWrite, inWritting} sdcmd_stat = CMD0;
 
   reg       sdclkl = 1'b0;
 
   localparam [2:0] RWAIT = 3'd0, RDURING = 3'd1, RTAIL = 3'd2, RDONE = 3'd3, RTIMEOUT = 3'd4;
 
+  localparam [2:0] writeWait = 3'd0, writeDoing = 3'd1, 
+  /// 意义不明，准备去掉
+  writeTail = 3'd2,
+  //
+  writeDone = 3'd3, writeTimeOut = 3'd4;
   reg [ 2:0] sddat_stat = RWAIT;
 
   //enum logic [2:0] {RWAIT, RDURING, RTAIL, RDONE, RTIMEOUT} sddat_stat = RWAIT;
 
-  reg [31:0] ridx = 0;
+  reg [31:0] writeBitIndex = 0;
 
-  assign rbusy     = (sdcmd_stat != CMD17);
-  assign rdone     = (sdcmd_stat == READING2) && (sddat_stat == RDONE);
+  assign rbusy     = (sdcmd_stat != waitOrder);
+  assign rdone     = (sdcmd_stat == inWritting) && (sddat_stat == RDONE);
 
   assign card_stat = sdcmd_stat;
 
@@ -121,7 +131,7 @@ module sd_write #(
     if (~rstn) begin
       set_cmd(0, 0, 0, 0);
       clkdiv      <= SLOWCLKDIV;
-      rsectoraddr <= 0;
+      theWriteSectorAddress <= 0;
       rca         <= 0;
       sdv1_maybe  <= 1'b0;
       card_type   <= UNKNOWN;
@@ -129,11 +139,12 @@ module sd_write #(
       cmd8_cnt    <= 0;
     end else begin
       set_cmd(0, 0, 0, 0);
-      if (sdcmd_stat == READING2) begin
+      if (sdcmd_stat == inWritting) begin
         if (sddat_stat == RTIMEOUT) begin
-          set_cmd(1, 96, 17, rsectoraddr);
-          sdcmd_stat <= READING;
-        end else if (sddat_stat == RDONE) sdcmd_stat <= CMD17;
+          // CM24，写入512字节的块。SD卡应该不需要擦除操作即可写入
+          set_cmd(1, 96, 24, theWriteSectorAddress);
+          sdcmd_stat <= prepareWrite;
+        end else if (sddat_stat == RDONE) sdcmd_stat <= waitOrder;
       end else if (~busy) begin
         case (sdcmd_stat)
           CMD0:     set_cmd(1, (SIMULATE ? 512 : 64000), 0, 'h00000000);
@@ -144,11 +155,12 @@ module sd_write #(
           CMD3:     set_cmd(1, 256, 3, 'h00000000);
           CMD7:     set_cmd(1, 256, 7, {rca, 16'h0});
           CMD16:    set_cmd(1, (SIMULATE ? 512 : 64000), 16, 'h00000200);
-          CMD17:
-          if (rstart) begin
-            set_cmd(1, 96, 17, (card_type == SDHCv2) ? rsector : (rsector << 9));
-            rsectoraddr <= (card_type == SDHCv2) ? rsector : (rsector << 9);
-            sdcmd_stat  <= READING;
+          waitOrder:
+          /// SDID空闲，可以使用
+          if (StartWrite) begin
+            set_cmd(1, 96, 17, (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
+            theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
+            sdcmd_stat  <= prepareWrite;
           end
         endcase
       end else if (done) begin
@@ -183,10 +195,10 @@ module sd_write #(
             clkdiv <= FASTCLKDIV;
             sdcmd_stat <= CMD16;
           end
-          CMD16: if (~timeout && ~syntaxe) sdcmd_stat <= CMD17;
-          default:  //READING :   
-          if (~timeout && ~syntaxe) sdcmd_stat <= READING2;
-          else set_cmd(1, 128, 17, rsectoraddr);
+          CMD16: if (~timeout && ~syntaxe) sdcmd_stat <= waitOrder;
+          default:  //prepareWrite :   
+          if (~timeout && ~syntaxe) sdcmd_stat <= inWritting;
+          else set_cmd(1, 128, 17, theWriteSectorAddress);
         endcase
       end
     end
@@ -199,42 +211,45 @@ module sd_write #(
       outbyte <= 0;
       sdclkl  <= 1'b0;
       sddat_stat <= RWAIT;
-      ridx    <= 0;
+      writeBitIndex    <= 0;
     end else begin
       outen   <= 1'b0;
       outaddr <= 0;
       sdclkl  <= sdclk;
-      if (sdcmd_stat != READING && sdcmd_stat != READING2) begin
+      if (sdcmd_stat != prepareWrite && sdcmd_stat != inWritting) begin
         sddat_stat <= RWAIT;
-        ridx <= 0;
+        writeBitIndex <= 0;
       end else if (~sdclkl & sdclk) begin
         case (sddat_stat)
-          RWAIT: begin
+          writeWait: begin
             if (~sddat0) begin
-              sddat_stat <= RDURING;
-              ridx <= 0;
+              sddat_stat <= writeDoing;
+              writeBitIndex <= 0;
             end else begin
-              if(ridx > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
+              if(writeBitIndex > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
                 sddat_stat <= RTIMEOUT;
-              ridx <= ridx + 1;
+              writeBitIndex <= writeBitIndex + 1;
             end
           end
-          RDURING: begin
-            outbyte[3'd7-ridx[2:0]] <= sddat0;
-            if (ridx[2:0] == 3'd7) begin
-              outen   <= 1'b1;
-              outaddr <= ridx[11:3];
+          writeDoing: begin
+            sddat0 <= inbyte[3'd7-writeBitIndex[2:0]];
+            if (writeBitIndex[2:0] == 3'd7) begin
+              writeByteSuccess   <= 1'b1;
+              outaddr <= writeBitIndex[11:3];
             end
-            if (ridx >= 512 * 8 - 1) begin
-              sddat_stat <= RTAIL;
-              ridx <= 0;
+            else begin
+              writeByteSuccess<=0;
+            end
+            if (writeBitIndex >= 512 * 8 - 1) begin
+              sddat_stat <= writeTail;
+              writeBitIndex <= 0;
             end else begin
-              ridx <= ridx + 1;
+              writeBitIndex <= writeBitIndex + 1;
             end
           end
-          RTAIL: begin
-            if (ridx >= 8 * 8 - 1) sddat_stat <= RDONE;
-            ridx <= ridx + 1;
+          writeTail: begin
+            if (writeBitIndex >= 8 * 8 - 1) sddat_stat <= writeDone;
+            writeBitIndex <= writeBitIndex + 1;
           end
         endcase
       end

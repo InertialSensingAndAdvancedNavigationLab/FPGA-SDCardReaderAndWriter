@@ -20,6 +20,8 @@ module sd_file_write #(
     parameter CLK_FREQ = 'd20_000_000,  //时钟频率
     /// FIFO位宽
     parameter FIFOSizeWidth=12,
+    /// FIFO一次性写入数据，要求为一个扇区512的倍数
+    parameter FIFOOutputRequire='d512*1,
     /// 多少数据时更新文件
     parameter updateFileSystemSize='d1
 ) (
@@ -29,8 +31,8 @@ module sd_file_write #(
     input  wire       clk,
     // SDcard signals (connect to SDcard), this design do not use sddat1~sddat3.
     output wire       sdclk,
-    inout             sdcmd,
-    inout  wire       sddat0,  // FPGA only read SDDAT signal but never drive it
+    inout  wire           sdcmd,
+    input  wire       sddat0,  // FPGA only read SDDAT signal but never drive it
     // the input save data
     input  wire       rx,
     output wire [3:0] ok
@@ -42,22 +44,26 @@ module sd_file_write #(
   localparam [3:0] inReset = 'b0000,
   /// 初始化SD卡驱动
   initializeSDIO = 'b0001,
-
   /// 初始化SD卡驱动完成
   initializeSDIOFinish = 'b0010,
   /// 初始化读BPR表得到系统数据
   initializeBPR = 'b0011,
   /// 初始化读BPR表得到系统数据完成
-  initializeBPRFinish = 'b0110, 
+  initializeBPRFinish = 'b0110,
+  /// 读文件系统信息
   initializeFileSystem = 'b0111,
   /// 读取文件信息完成，同时也意味着SDIO控制权交给写模块
   initializeFileSystemFinish = 'b1000,
-  /// 初始化彻底完成
-  waitEnoughData = 'b1010,  /*
-  startWriteData='b1111;
-  writeFIFOData='b1111;
-  writeFIFODataFinish='b1111;*/
-  updateFileSystem = 'b1110, initializeFinish = 'b1111;
+  /// 读取文件信息完成，亦为等待数据状态
+  waitEnoughData = 'b1000,
+  /// 开始写入数据，先写FIFO数据
+  WriteFIFOData = 'b1001,
+  /// FIFO数据（一个扇区，512字节）写入完成
+  writeFIFODataEnd = 'b1010,
+  /// 开始写入文件长度修改后的新文件扇区
+  updateFileSystem = 'b1011,
+  /// 更新文件所在扇区完成
+  updateFileSystemFinish = 'b1100, initializeFinish = 'b1111;
 
   /// SDIO总裁模块，决定当前SDIO由读(Output:0)模块控制还是由写模块(Input:1)控制
   wire SDIOReadWrite;
@@ -89,11 +95,11 @@ module sd_file_write #(
   /// 
   wire [32*8-1:0] longFileName, shortFileName;
   /// 文件起始扇区
-  reg  [32:0] fileStartSector;
+  reg [32:0] fileStartSector;
   /// 
   wire [31:0] fileLength;
   /// SD接收数据线
-  /*
+
   /// 串口读入的字节数据
   wire [7:0] rx_data;
   /// 串口完成一个字节读入的标识
@@ -124,16 +130,26 @@ module sd_file_write #(
       .full(),  // output full
       .empty(),  // output empty
       .rd_data_count(theNumberOfFIFOData)  // output [11 : 0] rd_data_count
-  );*/
+  );
   /// BPR信息区
-  /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
-  reg  [15:0] ReservedSectors;
-  /// 每FAT扇区数
-  reg  [31:0] theLengthOfFAT;
-  /// FAT表一般均为2
-  reg  [ 8:0] NumberOfFAT;
-  /// 根路径地址所在扇区,若使用的是非SD卡设备，可以精确到字节，那么请自行乘以theSizeofSectors
+
   wire [31:0] theRootDirectory;
+  ReadBPR theBPRInformationProvider (
+      .theRootDirectory(theRootDirectory),
+      .isEdit((workState == initializeBPR) && inReciveData),
+      .EditAddress(reciveDataAddress),
+      .EditByte(reciveData)
+  );
+  /// 文件扇区信息区
+  reg isEditRAM;
+  reg [9:0] ramAddress;
+  reg [7:0] editRAMByte;
+  FileSystemBlock theFileInformationKeeper (
+      .InputOrOutput(isEditRAM),
+      .ByteAddress(ramAddress),
+      .EditByte(editRAMByte),
+      .Byte(reciveData)
+  );
   //reg  [31:0] theRootDirectoryAddress;
   getTheRootDirectory GetTheFileDirectoryStartAddress (
       /// 保留扇区数
@@ -163,8 +179,8 @@ module sd_file_write #(
       .CountWidth(21)
   ) TheWriteDataLength (
       /// 当系统未初始化完成，系统并不会向SD卡中写入数据，故一定始终为0，始终复位
-      .sys_rst_n(initializeFinish),
-      .AddOnce  (wr_req),
+      .sys_rst_n(workState != inReset),
+      .AddOnce  (sendFinish),
       /// 舍弃掉低10位，即相当于FileLength乘以512，那么需要注意的是，实际上计数器只使用了[21:0]，22位，高于22位的技术将溢出舍弃
       .NowCount (fileLength[31:10])
   );
@@ -204,7 +220,7 @@ module sd_file_write #(
           /// 读取总线交给读模块
           //SDIOReadWrite<=SDIORead;
           /// 读取地址修改为0
-          readSectorAddress <= 0;
+          theSectorAddress <= 0;
           /// 读取使能应该是只需要使能一个周期即可，而不是一直使能
           readStart <= 1;
         end
@@ -217,14 +233,24 @@ module sd_file_write #(
         end
         /// 读取BPR信息完成后，接下来是需要载入记录文件信息的所在块，以此在定期保存状态下将修改后的文件信息保存
         initializeBPRFinish: begin
-          /// 此时BPR数据读入，theRootDirectory计算输出文件所在扇区
-          readSectorAddress <= theRootDirectory;
-          readStart <= 1;
-          workState <= initializeFileSystem;
+          /// 检查theRootDirectory是否正确，至少，0号扇区,FAT表,theRootDirectory将大于8(猜的，能算，8肯定有)
+          if (theRootDirectory > 'd64) begin
+            /// 此时BPR数据读入，theRootDirectory计算输出文件所在扇区
+            theSectorAddress <= theRootDirectory;
+            readStart <= 1;
+            workState <= initializeFileSystem;
+          end
         end
         /// 该段见以以reciveData和ReciveEnd的电路模块
         initializeFileSystem: begin
           readStart <= 0;
+
+          isEditRAM <= 0;
+          if (inReciveData) begin
+            isEditRAM   <= 1;
+            ramAddress  <= reciveDataAddress;
+            editRAMByte <= reciveData;
+          end
           if (reciveEnd) begin
             workState <= initializeFileSystemFinish;
           end
@@ -234,15 +260,42 @@ module sd_file_write #(
         initializeFileSystemFinish: begin
           /// 转让文件使用权
           //SDIOReadWrite<=SDIOWrite;
-          workState <= initializeFinish;
+          //workState <= initializeFinish;
+          if (theNumberOfFIFOData > FIFOOutputRequire) begin
+            workState <= WriteFIFOData;
+            theSectorAddress <= theRootDirectory + fileLength[31:10];
+            blockAddressEnable <= 1;
+          end
 
+        end
+        WriteFIFOData: begin
+          if (sendFinish) begin
+            workState <= writeFIFODataEnd;
+
+          end
+          //  sendData<=FileSaveDataBlock[blockAddress];
+        end
+        writeFIFODataEnd: begin
+
+          theSectorAddress   <= theRootDirectory;
+          blockAddressEnable <= 1;
+          //  sendData<=FileSaveDataBlock[blockAddress];
         end
         updateFileSystem: begin
 
+          if (sendFinish) begin
+            workState <= updateFileSystemFinish;
+
+          end
           //  sendData<=FileSaveDataBlock[blockAddress];
         end
+        updateFileSystemFinish: begin
+          workState <= waitEnoughData;
+          //  sendData<=FileSaveDataBlock[blockAddress];
+        end
+
         default: begin
-          //workState   <= inReset;
+          workState <= inReset;
         end
       endcase
 
@@ -253,8 +306,6 @@ module sd_file_write #(
       FileSaveDataBlock[4] <= shortFileName;
     end*/
   end
-  /// 要读的扇区地址
-  reg [31:0] readSectorAddress;
   /// 开始读
   reg readStart;
   /// 收到的数据
@@ -269,22 +320,22 @@ module sd_file_write #(
   /// 读模块所使用SDIO线，该线需要经过SDIOReadWrite仲裁决定
   wire [0:0] readSDdata;
 
-  wire  [15:0] readCMDClockSpeed;
+  wire [15:0] readCMDClockSpeed;
   wire readCMDStart;
-  wire  [15:0] readCMDPrecnt;
-  wire  [ 5:0] readCMDOrderType;
+  wire [15:0] readCMDPrecnt;
+  wire [5:0] readCMDOrderType;
   wire [31:0] readCMDArgument;
   sd_reader #(
       .CLK_DIV(CLK_DIV)
   ) readAndInit (
       .rstn     (rstn),
       .clk      (clk),
-      .sdclk (sdclk),
+      .sdclk    (sdclk),
       .sddat0   (readSDdata),
       .card_type(SDCardType),
       .card_stat(SDcardState),
       .rstart   (readStart),
-      .rsector  (readSectorAddress),
+      .rsector  (theSectorAddress),
       .rbusy    (),
       .rdone    (reciveEnd),
       .outen    (inReciveData),
@@ -295,24 +346,103 @@ module sd_file_write #(
       .precnt   (readCMDPrecnt),
       .cmd      (readCMDOrderType),
       .arg      (readCMDArgument),
-      .busy   (busy),
-      .done   (done),
-      .timeout(timeout),
-      .syntaxe(syntaxe),
-      .resparg (resparg)
+      .busy     (busy),
+      .done     (done),
+      .timeout  (timeout),
+      .syntaxe  (syntaxe),
+      .resparg  (resparg)
   );
-
+  /*
   /// 读BPR代码，工作条件：reciveData
   always @(inReciveData or reciveEnd) begin
-    if (rstn) begin
+    if (rstn && reciveEnd == 0 && SDIOReadWrite == SDIORead) begin
       /// 读BPR代码仅在初始化状态为读取BPR状态，即SDIO初始化完成状态使用。
       if (workState == initializeBPR) begin
-        /// 当reciveEnd触发本模块时，代表数据接收完毕，BPR读取完毕。此时将状态机推入BPR读取完成状态
-        if (reciveEnd) begin
-          //        workState <= initializeBPRFinish;
-        end
-      /// reciveEnd信号未触发，即因为reciveData触发本模块，由此根据reciveData记录需要记录的BPR信息
-        else if (inReciveData) begin
+        case (reciveDataAddress)
+          /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
+          'hE: begin
+            ReservedSectors[7:0] <= reciveData;
+          end
+          'hF: begin
+            ReservedSectors[15:8] <= reciveData;
+          end
+          /// 0x10,FAT表的份数
+          'h10: begin
+            NumberOfFAT <= reciveData;
+          end
+          /// 0x24:每FAT扇区数，占用4个字节
+          'h24: begin
+            theLengthOfFAT[7:0] <= reciveData;
+          end
+          'h25: begin
+            theLengthOfFAT[15:8] <= reciveData;
+          end
+          'h26: begin
+            theLengthOfFAT[23:16] <= reciveData;
+          end
+          'h27: begin
+            theLengthOfFAT[31:24] <= reciveData;
+          end
+        endcase
+      end else if (workState == initializeFileSystem) begin
+        FileSaveDataBlock[reciveDataAddress] <= reciveData;
+      end
+    end
+  end
+
+*/
+  /// 要读/写的扇区地址
+  reg  [31:0] theSectorAddress;
+  /// 开始读
+  reg         sendStart;
+  /// 准备写入的下一个数据，数据已经准备好
+  reg         sendDataEnable;
+  /// 需要发送的数据
+  reg  [ 7:0] sendData;
+  /// 成功写入应该字节
+  wire        sendEnd;
+  /// 写入结束
+  wire        sendFinish;
+
+  /// SDIO
+  wire [ 0:0] writeSDData;
+
+  /// SDIO线
+  wire [15:0] writeCMDClockSpeed;
+  wire        writeCMDStart;
+  wire [15:0] writeCMDPrecnt;
+  wire [ 5:0] writeCMDOrderType;
+  wire [31:0] writeCMDArgument;
+  sd_write #(
+      .CLK_DIV(CLK_DIV)
+  ) WriteAndUpdate (
+      .rstn              (rstn),
+      .clk               (clk),
+      .sdclk             (sdclk),
+      .sddat0            (writeSDData),
+      .writeSectorAddress(theSectorAddress),
+      .StartWrite        (sendStart),
+      .inEnable          (sendDataEnable),
+      .inbyte            (sendData),
+      .writeByteSuccess  (sendEnd),
+      .writeBlockFinish  (sendFinish),
+      .clkdiv            (writeCMDClockSpeed),
+      .start             (writeCMDPrecnt),
+      .precnt            (writeCMDStart),
+      .cmd               (writeCMDOrderType),
+      .arg               (writeCMDArgument),
+      .busy              (busy),
+      .done              (done),
+      .timeout           (timeout),
+      .syntaxe           (syntaxe),
+      .resparg           (resparg)
+  );
+  /*
+  /// 写数据代码，这个没办法，只能时钟驱动
+  always @(posedge clk) begin
+    if (rstn && sendEnd==0&&SDIOReadWrite==SDIOWrite) begin
+      /// 读BPR代码仅在初始化状态为读取BPR状态，即SDIO初始化完成状态使用。
+      if (workState == initializeBPR) begin
           case (reciveDataAddress)
             /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
             'hE: begin
@@ -339,120 +469,51 @@ module sd_file_write #(
               theLengthOfFAT[31:24] <= reciveData;
             end
           endcase
-        end
       end
-    end
-  end
-  /// 读文件系统块代码，工作条件：reciveData或reciveEnd
-  always @(inReciveData or reciveEnd) begin
-    if (rstn) begin
-
-      /// 读BPR代码仅在初始化状态为读取BPR状态，即SDIO初始化完成状态使用。
-      if (workState == initializeFileSystem) begin
-        /// 当reciveEnd触发本模块时，代表数据接收完毕，BPR读取完毕。此时将状态机推入BPR读取完成状态
-        if (reciveEnd) begin
-          //        workState <= initializeFileSystemFinish;
-        end
-      /// reciveEnd信号未触发，即因为reciveData触发本模块，由此根据reciveData记录需要记录的BPR信息
-        else if (inReciveData) begin
+      else if (workState == initializeFileSystem) begin
           FileSaveDataBlock[reciveDataAddress] <= reciveData;
-          /// blockAddressEnable未启用，代表此时刚刚进入读根文件路径状态，现进行一些文件信息初始化操作
-        end
       end
     end
-  end
-
-
-  /// 要写的扇区地址
-  reg [31:0] writeSectorAddress;
-  /// 开始读
-  reg writeStart;
-  /// 收到的数据
-  wire inSendData;
-  /// SDIO读模块部分
-  wire [31:0] sendDataAddress;
-  /// SDIO当前读出来的模块
-  reg [7:0] sendData;
-  /// SDIO读结束
-  wire sendEnd;
-
-  /// SDIO
-  wire [0:0] writeSDData;
-  
-  /// SDIO线
-  wire  [15:0] writeCMDClockSpeed;
-  wire         writeCMDStart;
-  wire  [15:0] writeCMDPrecnt;
-  wire  [ 5:0] writeCMDOrderType;
-  wire  [31:0] writeCMDArgument;
-  sd_write #(
-      .CLK_DIV(CLK_DIV)
-  ) WriteAndUpdate (
-      .rstn   (rstn),
-      .clk    (clk),
-      .sdclk (sdclk),
-      .sddat0 (writeSDData),
-      .rstart (readStart),
-      .writeSectorAddress(theRootDirectory+fileLength[31:10]),
-      .inbyte(reciveData),
-      .clkdiv (writeCMDClockSpeed),
-      .start  (writeCMDPrecnt),
-      .precnt (writeCMDStart),
-      .cmd    (writeCMDOrderType),
-      .arg    (writeCMDArgument),
-      .busy   (busy),
-      .done   (done),
-      .timeout(timeout),
-      .syntaxe(syntaxe),
-      .resparg (resparg)
-  );
+  end*/
   /// SDIO总线总裁
   always @(*) begin
-    sendData <= FileSaveDataBlock[blockAddress];
-          if (SDIOReadWrite == SDIORead) begin
-        SDCMDClockSpeed <= readCMDClockSpeed;
-        SDCMDStart <= readCMDStart;
-        SDCMDPrecnt <= readCMDPrecnt;
-        SDCMDOrderType <= readCMDOrderType;
-        SDCMDArgument <= readCMDArgument;
-      end
-      else begin
-        SDCMDClockSpeed <= writeCMDClockSpeed;
-        SDCMDStart <= writeCMDStart;
-        SDCMDPrecnt <= writeCMDPrecnt;
-        SDCMDOrderType <= writeCMDOrderType;
-        SDCMDArgument <= writeCMDArgument;
-      end
+    //sendData <= FileSaveDataBlock[blockAddress];
+    /*
+    if (SDIOReadWrite == SDIORead) begin
+      SDCMDClockSpeed <= readCMDClockSpeed;
+      SDCMDStart <= readCMDStart;
+      SDCMDPrecnt <= readCMDPrecnt;
+      SDCMDOrderType <= readCMDOrderType;
+      SDCMDArgument <= readCMDArgument;
+    end 
+    else begin
+      SDCMDClockSpeed <= writeCMDClockSpeed;
+      SDCMDStart <= writeCMDStart;
+      SDCMDPrecnt <= writeCMDPrecnt;
+      SDCMDOrderType <= writeCMDOrderType;
+      SDCMDArgument <= writeCMDArgument;
+    end*/
   end
-  assign readSDdata=SDIOReadWrite?1'bz:sddat0;
-  assign sddat0=SDIOReadWrite?writeSDData:1'bz;
-
-  //assign sdclk = SDIOReadWrite ? writeSDClock : readSDClock;  
-  //assign sdcmd=readSDCMD;
-  //assign sddat0=readSDdata;
-  /*
-  twoWireSelector SDIOCMDSelector (
-      .theProvideWire ({writeSDCMD, readSDCMD}),
-      .selectorIndex  (SDIOReadWrite),
-      .theSelectorWire(sdcmd)
-  );/*
-  wireSelector SDIODataSelector (
-      .theProvideWire ({writeSDData, readSDdata}),
-      .selectorIndex  (SDIOReadWrite),
-      .theSelectorWire(sddat0)
-  );*/
-  /// SDIO线
-  reg  [15:0] SDCMDClockSpeed;
-  reg         SDCMDStart;
-  reg  [15:0] SDCMDPrecnt;
-  reg  [ 5:0] SDCMDOrderType;
-  reg  [31:0] SDCMDArgument;
+  /// SDCMD线,SDCmd负责向SD卡发送命令，其由读模块和写模块控制。
+  /// SDIO Data线由读/写模块控制，其中，读模块仅接收数据，写模块仅发送数据，故当处于读状态时，SDIO处于高阻态读取数据；处于写状态时，SDIO连接写信号
+  assign readSDdata = sddat0;//SDIOReadWrite ? 1'bz : sddat0;
+  //assign sddat0 = SDIOReadWrite ? writeSDData : 1'bz;
+  assign SDCMDClockSpeed = SDIOReadWrite ?writeCMDClockSpeed:readCMDClockSpeed;
+  assign    SDCMDStart = SDIOReadWrite ?writeCMDStart:readCMDStart;
+  assign    SDCMDPrecnt = SDIOReadWrite ?writeCMDPrecnt: readCMDPrecnt;
+  assign    SDCMDOrderType = SDIOReadWrite ?writeCMDOrderType: readCMDOrderType;
+  assign    SDCMDArgument= SDIOReadWrite ? writeCMDArgument:readCMDArgument;
+  wire [15:0] SDCMDClockSpeed;
+  wire        SDCMDStart;
+  wire [15:0] SDCMDPrecnt;
+  wire [ 5:0] SDCMDOrderType;
+  wire [31:0] SDCMDArgument;
   wire        busy;
   wire        done;
   wire        timeout;
   wire        syntaxe;
   wire [31:0] resparg;
-  
+
   sdcmd_ctrl SDIOCMD (
       .rstn   (rstn),
       .clk    (clk),
