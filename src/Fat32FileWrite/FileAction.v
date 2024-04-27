@@ -9,17 +9,17 @@ module ReadBPR #(
     /// 正在编辑该模块
     input wire isEdit,
     /// 编辑的地址（与扇区地址一致）
-    input wire [9:0] EditAddress,
+    input wire [8:0] EditAddress,
     /// 编辑的数据
     input wire[7:0] EditByte
 );
 
     /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
-    reg [15:0]    ReservedSectors;
+    reg [15:0]    ReservedSectors=0;
     /// 每FAT扇区数
-    reg [31:0]    theLengthOfFAT;
+    reg [31:0]    theLengthOfFAT=0;
     /// FAT表一般均为2，在此视为参数。当然，读取也行。
-    reg [8:0] NumberOfFAT;
+    reg [8:0] NumberOfFAT=0;
 
   always @(posedge isEdit) begin
           case (EditAddress)
@@ -50,8 +50,8 @@ module ReadBPR #(
           endcase
   end
   /// 编辑结束的下降沿，即不再编辑，输出地址固定
-  always @(*) begin
-      theRootDirectory <= ReservedSectors + (theLengthOfFAT*NumberOfFAT);
+  always @(negedge isEdit) begin
+      theRootDirectory <= ReservedSectors + theLengthOfFAT*NumberOfFAT;
   end
 endmodule
 /**
@@ -78,7 +78,7 @@ reg [7:0] RAM [theSizeofBlock-1:0];
     /// FAT表一般均为2，在此视为参数。当然，读取也行。
     reg [8:0] NumberOfFAT ;
 
-  always @(InputOrOutput) begin
+  always @(posedge InputOrOutput) begin
             RAM[ByteAddress]<=EditByte;
   end
   assign Byte=RAM[ByteAddress];
