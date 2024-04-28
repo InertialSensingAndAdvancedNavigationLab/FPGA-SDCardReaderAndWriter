@@ -158,7 +158,7 @@ module sd_write #(
           waitOrder:
           /// SDID空闲，可以使用
           if (StartWrite) begin
-            set_cmd(1, 96, 17, (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
+            set_cmd(1, 96, 24, (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
             theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
             sdcmd_stat  <= prepareWrite;
           end
@@ -198,7 +198,7 @@ module sd_write #(
           CMD16: if (~timeout && ~syntaxe) sdcmd_stat <= waitOrder;
           default:  //prepareWrite :   
           if (~timeout && ~syntaxe) sdcmd_stat <= inWritting;
-          else set_cmd(1, 128, 17, theWriteSectorAddress);
+          else set_cmd(1, 128, 24, theWriteSectorAddress);
         endcase
       end
     end
