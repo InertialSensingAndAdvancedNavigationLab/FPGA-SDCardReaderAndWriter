@@ -37,14 +37,6 @@ module sd_reader #(
     output reg outen,  // when outen=1, a byte of sector content is read out from outbyte
     output reg [8:0] outaddr,  // outaddr from 0 to 511, because the sector size is 512
     output reg [7:0] outbyte,  // a byte of sector content
-    // SD写信号
-    // 外部写信号数据准备好了
-    /*
-    input wire inEnable,
-    /// 需要写入的数据
-    input wire [7:0]inByte,
-    /// 内部写入SD卡成功
-    input wire inputSuccess*/
     /// SDIO CMD控制器，
     /// 之所以将其移出reader，是因为对于一个读写系统而言，writer同样需要使用cmd，若两个模块各实现一次，则将浪费一定资源，并且需要对两者的inout线cmd进行选线，非常复杂
     /// 但是SDData，对于Reader，只是input，对于Writer，只是Output，其选线器相对较简单，且在项目中，应该有纯保存数据（直接定向写入，只要有文件系统能看到文件）和纯读取文件（只加载文件内容），故Reader与Writer单独实现
@@ -74,7 +66,8 @@ readerDebuger theReadDebugger(
   .probe8(outen),
   .probe9(outaddr),
   .probe10(outbyte),
-  .probe11(sddat0)
+  .probe11(sddat0),
+  .probe12(rsector)
 );
   initial {outen, outaddr, outbyte} = 0;
 
