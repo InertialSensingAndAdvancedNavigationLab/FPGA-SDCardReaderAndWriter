@@ -24,22 +24,23 @@ module sd_write #(
     input wire sdclk,
     output reg sddat0,  // FPGA only read SDDAT signal but never drive it
     output wire rbusy,
-    // sector data output interface (sync with clk)
-    output reg outen,  // when outen=1, a byte of sector content is read out from outbyte
-    output reg [8:0] outaddr,  // outaddr from 0 to 511, because the sector size is 512
     input wire inEnable,
     output reg [7:0] outbyte,  // a byte of sector content
     output wire byteDone,
     // show card status
-    output wire [3:0] card_stat,  // show the sdcard initialize status
-    output reg [1:0] card_type,  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
     input wire [31:0] writeSectorAddress,
     /// Write
     input wire StartWrite,
     input wire inEnable,
-    input wire [7:0] inbyte,  // a byte of sector content
-    output reg writeByteSuccess,
-    output reg writeBlockFinish,
+    // 输入的数据
+    input wire [7:0] inByte,  // a byte of sector content
+    output wire [31:0]theWriteBitIndex,
+    output reg prepareNextByte,
+    /// 块写入完成
+    output wire writeBlockFinish,
+    /// 接收来自于Reader的初始化
+    input wire [1:0] theCard_type,  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
+    
     /// SDCMD
     output reg [15:0] clkdiv,
     output reg start,
@@ -53,7 +54,8 @@ module sd_write #(
     input wire [31:0] resparg
 );
 
-
+  reg [7:0] sendByte;  // a byte of sector content
+   reg [1:0] card_type;  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
 
   localparam [1:0] UNKNOWN = 2'd0,  // SD card type
   SDv1 = 2'd1, SDv2 = 2'd2, SDHCv2 = 2'd3;
@@ -73,41 +75,43 @@ module sd_write #(
   reg [ 2:0] cmd8_cnt = 0;
   reg [15:0] rca = 0;
 
-  localparam [3:0] CMD0      = 4'd0,
+  localparam [3:0] 
+  /*CMD0      = 4'd0,
                  CMD8      = 4'd1,
                  CMD55_41  = 4'd2,
                  ACMD41    = 4'd3,
                  CMD2      = 4'd4,
                  CMD3      = 4'd5,
                  CMD7      = 4'd6,
-                 CMD16     = 4'd7,
-                 /// 等待命令状态
+                 CMD16     = 4'd7,*/
+                 // CMD16,设置写入块大小，暂时不使用
+                 setWriteBlockSize =4'd7,
+                 /// 等待命令状态，CM24
                  waitOrder     = 4'd8,
                  prepareWrite   = 4'd9,
                  inWritting  = 4'd10;
 
-  reg [3:0] sdcmd_stat = CMD0;
+  reg [3:0] sdcmd_stat = waitOrder;
   //enum logic [3:0] {CMD0, CMD8, CMD55_41, ACMD41, CMD2, CMD3, CMD7, CMD16, waitOrder, prepareWrite, inWritting} sdcmd_stat = CMD0;
 
   reg       sdclkl = 1'b0;
 
-  localparam [2:0] RWAIT = 3'd0, RDURING = 3'd1, RTAIL = 3'd2, RDONE = 3'd3, RTIMEOUT = 3'd4;
-
-  localparam [2:0] writeWait = 3'd0, writeDoing = 3'd1, 
+  localparam [2:0] writeWait = 3'd0, writeDoing = 3'd1,
   /// 意义不明，准备去掉
   writeTail = 3'd2,
   //
-  writeDone = 3'd3, writeTimeOut = 3'd4;
-  reg [ 2:0] sddat_stat = RWAIT;
+  writeDone = 3'd3,
+  /// 写超时
+   writeTimeOut = 3'd4;
+  reg [ 2:0] sddat_stat = writeWait;
 
-  //enum logic [2:0] {RWAIT, RDURING, RTAIL, RDONE, RTIMEOUT} sddat_stat = RWAIT;
+  //enum logic [2:0] {writeWait, writeDoing, writeTail, writeDone, writeTimeOut} sddat_stat = writeWait;
 
   reg [31:0] writeBitIndex = 0;
-
+assign theWriteBitIndex=writeBitIndex;
   assign rbusy     = (sdcmd_stat != waitOrder);
-  assign rdone     = (sdcmd_stat == inWritting) && (sddat_stat == RDONE);
+  assign writeBlockFinish     = (sdcmd_stat == inWritting) && (sddat_stat == writeDone);
 
-  assign card_stat = sdcmd_stat;
 
 
   task set_cmd;
@@ -128,7 +132,7 @@ module sd_write #(
 
 
   always @(posedge clk or negedge rstn)
-    if (~rstn) begin
+    /*if (~rstn) begin
       set_cmd(0, 0, 0, 0);
       clkdiv      <= SLOWCLKDIV;
       theWriteSectorAddress <= 0;
@@ -137,16 +141,36 @@ module sd_write #(
       card_type   <= UNKNOWN;
       sdcmd_stat  <= CMD0;
       cmd8_cnt    <= 0;
-    end else begin
+    end*/
+    
+  /// 说明：对于SD卡写入器，认为其初始化由SD读取完成，故当SD读卡器复位时，默认继承自写准备状态而非写重置状态
+    if (~rstn) begin
+      set_cmd(0, 0, 0, 0);
+      /// 分频器，在初始化过程中，若没有产生超时与错误，那么将会在到达等待命令前一个状态设置该值为快速时钟
+      clkdiv      <= FASTCLKDIV;
+      /// 该值无所谓。事实上在启动模块时将重新设置
+      theWriteSectorAddress <= 0;
+      rca         <= 0;
+      /// sdv1_maybe的含义是，有可能是因为使用的sdv1的卡，导致了超时。显然针对于设计的平台，不应该使用sdv1，其应该默认交接0
+      sdv1_maybe  <= 1'b0;
+      /// 该值默认交接v2.1，即3，为例保险起见，通过传入SDreader的卡状态
+      card_type   <= theCard_type;
+      /// 理论上只有在读取命令结束后交接，即waitOrder状态交接
+      sdcmd_stat  <= waitOrder;
+      /// 超时计数器，理论上交接前不会产生超时
+      cmd8_cnt    <= 0;
+    end
+     else begin
       set_cmd(0, 0, 0, 0);
       if (sdcmd_stat == inWritting) begin
-        if (sddat_stat == RTIMEOUT) begin
+        if (sddat_stat == writeTimeOut) begin
           // CM24，写入512字节的块。SD卡应该不需要擦除操作即可写入
           set_cmd(1, 96, 24, theWriteSectorAddress);
           sdcmd_stat <= prepareWrite;
-        end else if (sddat_stat == RDONE) sdcmd_stat <= waitOrder;
+        end else if (sddat_stat == writeDone) sdcmd_stat <= waitOrder;
       end else if (~busy) begin
         case (sdcmd_stat)
+        /*
           CMD0:     set_cmd(1, (SIMULATE ? 512 : 64000), 0, 'h00000000);
           CMD8:     set_cmd(1, 512, 8, 'h000001aa);
           CMD55_41: set_cmd(1, 512, 55, 'h00000000);
@@ -154,7 +178,7 @@ module sd_write #(
           CMD2:     set_cmd(1, 256, 2, 'h00000000);
           CMD3:     set_cmd(1, 256, 3, 'h00000000);
           CMD7:     set_cmd(1, 256, 7, {rca, 16'h0});
-          CMD16:    set_cmd(1, (SIMULATE ? 512 : 64000), 16, 'h00000200);
+          CMD16:    set_cmd(1, (SIMULATE ? 512 : 64000), 16, 'h00000200);*/
           waitOrder:
           /// SDID空闲，可以使用
           if (StartWrite) begin
@@ -165,6 +189,7 @@ module sd_write #(
         endcase
       end else if (done) begin
         case (sdcmd_stat)
+        /*
           CMD0: sdcmd_stat <= CMD8;
           CMD8:
           if (~timeout && ~syntaxe && resparg[7:0] == 8'haa) begin
@@ -196,6 +221,7 @@ module sd_write #(
             sdcmd_stat <= CMD16;
           end
           CMD16: if (~timeout && ~syntaxe) sdcmd_stat <= waitOrder;
+          */
           default:  //prepareWrite :   
           if (~timeout && ~syntaxe) sdcmd_stat <= inWritting;
           else set_cmd(1, 128, 24, theWriteSectorAddress);
@@ -206,18 +232,14 @@ module sd_write #(
 
   always @(posedge clk or negedge rstn)
     if (~rstn) begin
-      outen   <= 1'b0;
-      outaddr <= 0;
       outbyte <= 0;
       sdclkl  <= 1'b0;
-      sddat_stat <= RWAIT;
+      sddat_stat <= writeWait;
       writeBitIndex    <= 0;
     end else begin
-      outen   <= 1'b0;
-      outaddr <= 0;
       sdclkl  <= sdclk;
       if (sdcmd_stat != prepareWrite && sdcmd_stat != inWritting) begin
-        sddat_stat <= RWAIT;
+        sddat_stat <= writeWait;
         writeBitIndex <= 0;
       end else if (~sdclkl & sdclk) begin
         case (sddat_stat)
@@ -227,18 +249,19 @@ module sd_write #(
               writeBitIndex <= 0;
             end else begin
               if(writeBitIndex > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
-                sddat_stat <= RTIMEOUT;
+                sddat_stat <= writeTimeOut;
               writeBitIndex <= writeBitIndex + 1;
             end
           end
           writeDoing: begin
-            sddat0 <= inbyte[3'd7-writeBitIndex[2:0]];
-            if (writeBitIndex[2:0] == 3'd7) begin
-              writeByteSuccess   <= 1'b1;
-              outaddr <= writeBitIndex[11:3];
+            sddat0 <= sendByte[3'd7-writeBitIndex[2:0]];
+            if (writeBitIndex[2:0] == 3'd0) begin
+              /// 因为数据已经装载，故允许随时准备下一个数据
+              sendByte<=inByte;
+              prepareNextByte<=1;
             end
             else begin
-              writeByteSuccess<=0;
+              prepareNextByte<=0;
             end
             if (writeBitIndex >= 512 * 8 - 1) begin
               sddat_stat <= writeTail;

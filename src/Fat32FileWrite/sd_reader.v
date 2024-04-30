@@ -15,7 +15,6 @@ module sd_reader #(
                                       // ......
     parameter       SIMULATE = 0
 ) (
-  input wire  DebugRealClock,
     // rstn active-low, 1:working, 0:reset
     input wire rstn,
     // clock
@@ -52,23 +51,6 @@ module sd_reader #(
     input  wire        syntaxe,
     input  wire [31:0] resparg
 );
-
-readerDebuger theReadDebugger(
-  .clk(DebugRealClock),
-  .probe0(clk),
-  .probe1(sdclk),
-  .probe2(rstart),
-  .probe3(rbusy),
-  .probe4(rdone),
-  .probe5(sdcmd_stat),
-  .probe6(sddat_stat),
-  .probe7(ridx),
-  .probe8(outen),
-  .probe9(outaddr),
-  .probe10(outbyte),
-  .probe11(sddat0),
-  .probe12(rsector)
-);
   initial {outen, outaddr, outbyte} = 0;
 
   localparam [1:0] UNKNOWN = 2'd0,  // SD card type
@@ -82,15 +64,20 @@ readerDebuger theReadDebugger(
   reg        sdv1_maybe = 1'b0;
   reg [ 2:0] cmd8_cnt = 0;
   reg [15:0] rca = 0;
-
+/// 加载顺序：复位
   localparam [3:0] CMD0      = 4'd0,
+  /// 判断类型
                  CMD8      = 4'd1,
+                 /// 
                  CMD55_41  = 4'd2,
                  ACMD41    = 4'd3,
+                 /// 获取SD卡CID序列
                  CMD2      = 4'd4,
+                 /// 获取RCA地址
                  CMD3      = 4'd5,
+                 // 选中SD卡
                  CMD7      = 4'd6,
-  /// 
+  /// 复位设置块大小，可以修改此，使得不是单块读
   CMD16 = 4'd7,
   /// 单个块读
   CMD17 = 4'd8, READING = 4'd9, READING2 = 4'd10;

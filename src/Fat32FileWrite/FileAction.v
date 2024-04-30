@@ -7,7 +7,6 @@
 module ReadMBRorDBR #(
     parameter theSizeofSectors = 'd512
 ) (
-    input theRealCLokcForDebug,
     /// 根路径地址所在扇区,若使用的是非SD卡设备，可以精确到字节，那么请自行乘以theSizeofSectors
     output reg [31:0] theBPRDirectory,
     /// 正在编辑该模块
@@ -17,19 +16,7 @@ module ReadMBRorDBR #(
     /// 编辑的数据
     input wire [7:0] EditByte
 );
-
-  RootDirDebugger mbrDirDebugger (
-      .clk(theRealCLokcForDebug),
-      .probe0(isEdit),
-      .probe1(theBPRDirectory),
-      .probe2(theBPRDirectory),
-      .probe3(theBPRDirectory),
-      .probe4(theBPRDirectory),
-      .probe5(EditAddress),
-      .probe6(EditByte)
-  );
   /// 采用边沿触发可能会导致亚稳态，可能原因是SDIO的时钟显然慢于系统时钟，可能该模块工作在20Mhz而SDIO小于之，慢数据抵达快数据产生该问题。
-  /// 奇怪的BUG：写的是isEdit高电平触发，实际上是一直触发，现在改为上升沿触发以限制编辑次数
   always @(posedge isEdit) begin
       case (EditAddress)
         9'h1C6: begin
@@ -53,7 +40,6 @@ endmodule
 module ReadBPR #(
     parameter theSizeofSectors = 'd512
 ) (
-    input theRealCLokcForDebug,
     /// 根路径地址所在扇区,若使用的是非SD卡设备，可以精确到字节，那么请自行乘以theSizeofSectors
     output reg [31:0] theRootDirectory,
     /// 正在编辑该模块
@@ -70,17 +56,6 @@ module ReadBPR #(
   reg [31:0] theLengthOfFAT = 0;
   /// FAT表一般均为2，在此视为参数。当然，读取也行。
   reg [ 7:0] NumberOfFAT = 0;
-
-  RootDirDebugger RootDirDebugger (
-      .clk(theRealCLokcForDebug),
-      .probe0(isEdit),
-      .probe1(ReservedSectors),
-      .probe2(theLengthOfFAT),
-      .probe3(NumberOfFAT),
-      .probe4(theRootDirectory),
-      .probe5(EditAddress),
-      .probe6(EditByte)
-  );
   always @(posedge isEdit) begin
       case (EditAddress)
         /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
@@ -132,25 +107,17 @@ module FileSystemBlock #(
     output wire [7:0] Byte,
     /// 检索新文件位置命令：默认一个文件4+4=8字节，512/8=64，默认为一个块中恰好有64个文件。若本扇区中不存在足以存放文件的新空间(包括不连续空间，为了只更新一个块，加速进度)，那么返回不存在
     input wire checkoutFileExit,
+    /// 该信号表示当前扇区已经发现合适的文件存储位置，并且将文件数据写入该合适的位置
     output reg FileExist,
+    /// 该信号表示当前扇区没有合适的存放信息处，请加载另一个（下一个）扇区，并且重新给出checkoutFileExit命令搜索合适的位置
     output reg FileNotExist,
+    /// 文件保存的地址，注意，因为没有传入参数BPR的偏移地址，所以该值在使用时请加上外面计算的起始地址偏移地址
     output reg fileStartSector,
     /// 文件变更信息，需要文件信息器提供
     input wire[inputFileInformationLength-1:0] theChangeFileInput 
 );
-/*
-  RootDirDebugger fileDebugger (
-      .clk(theRealCLokcForDebug),
-      .probe0(InputOrOutput),
-      .probe1({writeAddress, writeAddress, writeAddress, writeAddress}),
-      .probe2({writeAddress, writeAddress, writeAddress, writeAddress}),
-      .probe3(EditByte),
-      .probe4({writeAddress, writeAddress, writeAddress, writeAddress}),
-      .probe5(readAddress),
-      .probe6(Byte)
-  );*/
   reg [7:0] RAM[theSizeofBlock-1:0];
-
+  reg [8:0] theFileSaveAddress;
   always @(posedge Clock) begin
     if (InputOrOutput) begin
 
@@ -161,9 +128,10 @@ module FileSystemBlock #(
   always @(posedge Clock) begin
     if (checkoutFileExit) begin
       if ((RAM[1] != 'd0) || (RAM[0] != 'd0)) begin
-
+/// 添加插入文件逻辑：可以寻找以32的倍数，连续inputFileInformationLength个字节为0x00的扇区地址，作为插入的地址
         FileExist <= 1;
-        fileStartSector <= 32'd16400;
+        /// 理论上新插入的文件位于最后，此时已经可以通过计算之前读过的文件中，利用起始地址与文件长度，得出最大（即最后）的未使用地址，作为本文件的开始地址
+        fileStartSector <= 32'ha001;
       end else begin
 
         FileNotExist <= 1;
