@@ -112,7 +112,7 @@ module FileSystemBlock #(
     /// 该信号表示当前扇区没有合适的存放信息处，请加载另一个（下一个）扇区，并且重新给出checkoutFileExit命令搜索合适的位置
     output reg FileNotExist,
     /// 文件保存的地址，注意，因为没有传入参数BPR的偏移地址，所以该值在使用时请加上外面计算的起始地址偏移地址
-    output reg fileStartSector,
+    output reg[31:0] fileStartSector,
     /// 文件变更信息，需要文件信息器提供
     input wire[inputFileInformationLength-1:0] theChangeFileInput 
 );

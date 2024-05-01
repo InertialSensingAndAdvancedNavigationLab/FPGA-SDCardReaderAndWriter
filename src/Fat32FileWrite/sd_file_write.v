@@ -21,7 +21,7 @@ module sd_file_write #(
     /// FIFO位宽
     parameter FIFOSizeWidth=12,
     /// FIFO一次性写入数据，要求为一个扇区512的倍数
-    parameter FIFOOutputRequire='d512,
+    parameter theOnceSaveSize='d512,
     /// 多少数据时更新文件
     parameter updateFileSystemSize='d1
 ) (
@@ -50,7 +50,7 @@ ByteAnalyze ReadDebugger(
       .clk(theRealCLokcForDebug),
       .probe0(clk),
       .probe1(havdGetDataToSend),
-      .probe2(autoFileSystemIndex),
+      .probe2(theSectorAddress),
       .probe3(sendData),
       .probe4(writeSDData),
       .probe5(requireFIFOOutput),
@@ -92,10 +92,13 @@ ByteAnalyze ReadDebugger(
 
   localparam [0:0] SDIORead = 1'b0, SDIOWrite = 1'b1;
   wire [32*8-1:0] longFileName, shortFileName;
+
   /// 文件起始扇区
-  wire [32:0] fileStartSector;
+  reg [31:0] fileSystemSector;
+  /// 文件起始扇区
+  wire [31:0] fileStartSector;
   /// 
-  wire [31:0] fileLength;
+  reg [31:0] fileSectorLength;
   /// SD接收数据线
 
   /// 串口读入的字节数据
@@ -125,7 +128,7 @@ ByteAnalyze ReadDebugger(
       .wr_en(rx_flag),  // input wr_en
       // FIFO数据为电平触发而非边沿触发，故需要requireFIFOOutput控制。这FIFO，requireFIFOOutput拉高再拉低居然是2.5个时钟周期，得操作一手上个锁
       // 拉高是立刻拉高，但是拉低操作要下个周期执行（可能是优化操作，使得拉高操作是被原先的拉高命令直接拉高）
-      .rd_en(requireFIFOOutput&&(~havdGetDataToSend)),  // input rd_en
+      .rd_en(requireFIFOOutput),  // input rd_en
       .dout(FIFOWriteOutData),  // output [7 : 0] dout
       .full(),  // output full
       .empty(),  // output empty
@@ -172,35 +175,25 @@ ByteAnalyze ReadDebugger(
       .fileStartSector(fileStartSector),
       .theChangeFileInput({longFileName, shortFileName})
   );
-
+/*
   /// 先保存长文件名，若长文件名的长度超过了13个字符(utf16编码，26字节)，则需要额外配置一个CreatelongFileName，并且修改其位置编号参数
   CreatelongFileName LongFileName (
-      .verify(fileLength),
+      .verify(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(longFileName)
   );
   /// 数个长文件名后接的短文件名，为包含文件属性的真实文件配置
   CreateShortFileName ShortFileName (
       .theFileStartSector(fileStartSector),
-      .FileLength(fileLength),
+      .fileSectorLength(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(shortFileName)
-  );
-  /// 数据写入长度计数器，记录的是已写入SD卡的数据，而非串口接收的数据
-  Count #(
-      .CountWidth(21)
-  ) TheWriteDataLength (
-      /// 当系统未初始化完成，系统并不会向SD卡中写入数据，故一定始终为0，始终复位
-      .sys_rst_n(workState != inReset),
-      .AddOnce  (sendFinish),
-      /// 舍弃掉低10位，即相当于FileLength乘以512，那么需要注意的是，实际上计数器只使用了[21:0]，22位，高于22位的技术将溢出舍弃
-      .NowCount (fileLength[31:10])
-  );
+  );*/
   /// SD卡状态
   wire [3:0] SDcardState;
   wire [1:0] SDCardType;
-  /// FileLength低10位始终为0，即FileLength为512的整数倍
-  assign fileLength[9:0] = 10'b0000000000;
+  /// fileSectorLength低10位始终为0，即fileSectorLength为512的整数倍
+  //assign fileSectorLength[9:0] = 10'b0000000000;
   /// 系统初始化状态机
   always @(posedge clk or negedge rstn) begin
     /// 系统复位
@@ -254,7 +247,7 @@ ByteAnalyze ReadDebugger(
           /// BPR地址不合理：可以反复搜索0地址，也可以自动往后搜索，重新进行读取BPR阶段
           else begin
             workState <= initializeMBRorDBR;
-            theSectorAddress <= theSectorAddress + 1;
+            theSectorAddress <= 0;  // <= theSectorAddress + 1;
             readStart <= 1;
           end
         end
@@ -302,8 +295,9 @@ ByteAnalyze ReadDebugger(
 
               workState <= initializeFileSystemFinish;
               checkoutFileExit <= 0;
+              fileSystemSector <= theSectorAddress;
+              fileSectorLength<=0;
             end else if (FileNotExist) begin
-
               checkoutFileExit <= 0;
               /// 当前扇区没有符合要求的文件系统，前往下一个扇区寻找
               theSectorAddress <= theSectorAddress + 1;
@@ -321,7 +315,6 @@ ByteAnalyze ReadDebugger(
               isReciveData <= 0;
             end else if (reciveEnd) begin
               checkoutFileExit <= 1;
-              //    workState <= initializeFileSystemFinish;
               isLoadRam <= 0;
             end
           end
@@ -331,9 +324,9 @@ ByteAnalyze ReadDebugger(
           /// 转让文件使用权
           //SDIOReadWrite<=SDIOWrite;
           workState <= waitEnoughData;
-          if (theNumberOfFIFOData > FIFOOutputRequire) begin
+          if (theNumberOfFIFOData > theOnceSaveSize) begin
             workState <= WriteFIFOData;
-            theSectorAddress <= fileStartSector;  // + fileLength[31:10];
+            theSectorAddress <= fileStartSector + fileSectorLength;
             sendStart <= 1;
             /// 从FIFO中预读取一个数据
             requireFIFOOutput <= 1;
@@ -342,22 +335,21 @@ ByteAnalyze ReadDebugger(
         end
         WriteFIFOData: begin
           sendStart <= 0;
-          /// 发送512个字节，产生512次装载信号，而最后一次不需要，只需要511次，以最后4位为例，当index为0111，即0:7时，autoFileSystemIndex[31:3]=0，产生第一次装载信号，那么最后一次产生装载信号应该是511:7，即只保留产生信号小于512-2部分。
-          if (autoFileSystemIndex[31:3] < (FIFOOutputRequire - 1)) begin
-            
-            if (requireFIFOOutput) begin
-              /// 该处优化很奇怪，当进入从FIFO写状态时候，立刻拉低，而当因为准备下一个字节而拉高时，拉低需要额外一个时钟周期，导致FIF0出来两个数据
-              requireFIFOOutput <= 0;
+          if (requireFIFOOutput) begin
+            requireFIFOOutput <= 0;
+            havdGetDataToSend <= 1;
+          end else if (prepareNextData) begin
+            /// 发送512个字节，共:进入1，发送512个字节，共513次装载信号，只需要512个装载信号，最后一个字节511不需要处理装载信号。以最后4位为例，当index为0111，即0:7时，autoFileSystemIndex[31:3]=0，产生第一次装载信号，那么最后一次产生装载信号应该是510:7，即只保留产生信号小于512-2部分。
+            if ((~havdGetDataToSend) && (autoFileSystemIndex[31:3] < (theOnceSaveSize - 'd1))) begin
+              //if (~havdGetDataToSend) begin
+              requireFIFOOutput <= 1;
+            end
+          end else begin
+            if (havdGetDataToSend) begin
+              /// FIFO数据的赋值，晚于FIFO出来的那一刻。为了保证赋值成功，改为在haveGetDataToSend的下降沿赋值。
               sendData <= FIFOWriteOutData;
-              havdGetDataToSend <= 1;
             end
-            if (prepareNextData) begin
-              if (~havdGetDataToSend) begin
-                requireFIFOOutput <= 1;
-              end
-            end else begin
-              havdGetDataToSend <= 0;
-            end
+            havdGetDataToSend <= 0;
           end
           if (sendFinish) begin
             workState <= writeFIFODataEnd;
@@ -365,22 +357,22 @@ ByteAnalyze ReadDebugger(
           end
         end
         writeFIFODataEnd: begin
-
-          theSectorAddress <= theRootDirectory;
+          theSectorAddress <= fileSystemSector;
           sendData <= theFileInformationBlockByte;
+          havdGetDataToSend <= 1;
           sendStart <= 1;
+          fileSectorLength<=fileSectorLength+1;
+          workState <= updateFileSystem;
         end
         /// 更新文件系统，工作流程说明：当发送数据至第6位时，调节RAN地址，当发送至第七位时，更新数据，第八位即下一个字节时，自动更新字节
         updateFileSystem: begin
           sendStart <= 0;
-          if (autoFileSystemIndex[2:0] == 'd6) begin
+          if (prepareNextData && havdGetDataToSend) begin
             theFileInformationBlockByteAddress = theFileInformationBlockByteAddress + 'd1;
             havdGetDataToSend <= 0;
-          end else if (prepareNextData) begin
-            if (~havdGetDataToSend) begin
-              havdGetDataToSend <= 1;
-              sendData <= theFileInformationBlockByte;
-            end
+          end else if (~(havdGetDataToSend || prepareNextData)) begin
+            havdGetDataToSend <= 1;
+            sendData <= theFileInformationBlockByte;
           end
           if (sendFinish) begin
             workState <= updateFileSystemFinish;
@@ -388,6 +380,7 @@ ByteAnalyze ReadDebugger(
         end
         updateFileSystemFinish: begin
           workState <= waitEnoughData;
+          havdGetDataToSend <= 0;
         end
         unKonwError: begin
 
@@ -434,6 +427,7 @@ ByteAnalyze ReadDebugger(
   wire [5:0] readCMDOrderType;
   wire [31:0] readCMDArgument;
   wire readingIsDoing;
+  wire [15:0] SDCardRCA;
   sd_reader #(
       .CLK_DIV(CLK_DIV)
   ) readAndInit (
@@ -443,6 +437,7 @@ ByteAnalyze ReadDebugger(
       .sddat0   (readSDdata),
       .card_type(SDCardType),
       .card_stat(SDcardState),
+      .rca(SDCardRCA),
       .rstart   (readStart),
       .rsector  (theSectorAddress),
       .rbusy    (readingIsDoing),
@@ -487,31 +482,33 @@ ByteAnalyze ReadDebugger(
   sd_write #(
       .CLK_DIV(CLK_DIV)
   ) WriteAndUpdate (
+      .theRealCLokcForDebug(theRealCLokcForDebug),
       /// 在交接前，系统始终处于复位状态，监听reader的值作为初始值
-      .rstn              (SDIOReadWrite),
-      .clk               (clk),
-      .sdclk             (sdclk),
-      .sddat0            (writeSDData),
-      .writeSectorAddress(theSectorAddress),
-      .StartWrite        (sendStart),
+      .rstn                (SDIOReadWrite),
+      .clk                 (clk),
+      .sdclk               (sdclk),
+      .sddat0              (writeSDData),
+      .writeSectorAddress  (theSectorAddress),
+      .StartWrite          (sendStart),
       //.inEnable          (sendDataEnable),
-      .inEnable          (workState == WriteFIFOData ? 'd1 : 'd0),
-      .inByte            (sendData),
+      //.inEnable          (workState == WriteFIFOData ? 'd1 : 'd0),
+      .inByte              (sendData),
       //.inbyte            ((workState==WriteFIFOData)?FIFOWriteOutData:'hFF),
-      .theWriteBitIndex  (autoFileSystemIndex),
-      .prepareNextByte   (prepareNextData),
-      .writeBlockFinish  (sendFinish),
-      .theCard_type      (SDCardType),
-      .clkdiv            (writeCMDClockSpeed),
-      .start             (writeCMDPrecnt),
-      .precnt            (writeCMDStart),
-      .cmd               (writeCMDOrderType),
-      .arg               (writeCMDArgument),
-      .busy              (busy),
-      .done              (done),
-      .timeout           (timeout),
-      .syntaxe           (syntaxe),
-      .resparg           (resparg)
+      .theWriteBitIndex    (autoFileSystemIndex),
+      .prepareNextByte     (prepareNextData),
+      .writeBlockFinish    (sendFinish),
+      .theCard_type        (SDCardType),
+      .theRCA(SDCardRCA),
+      .clkdiv              (writeCMDClockSpeed),
+      .start               (writeCMDStart),
+      .precnt              (writeCMDPrecnt),
+      .cmd                 (writeCMDOrderType),
+      .arg                 (writeCMDArgument),
+      .busy                (busy),
+      .done                (done),
+      .timeout             (timeout),
+      .syntaxe             (syntaxe),
+      .resparg             (resparg)
   );
   /// SDCMD线,SDCmd负责向SD卡发送命令，其由读模块和写模块控制。
   /// SDIO Data线由读/写模块控制，其中，读模块仅接收数据，写模块仅发送数据，故当处于读状态时，SDIO处于高阻态读取数据；处于写状态时，SDIO连接写信号

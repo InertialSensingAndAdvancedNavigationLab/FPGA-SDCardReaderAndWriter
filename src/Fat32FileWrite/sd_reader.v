@@ -27,6 +27,8 @@ module sd_reader #(
     // show card status
     output wire [3:0] card_stat,  // show the sdcard initialize status
     output reg [1:0] card_type,  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
+
+    output reg [15:0] rca,
     // user read sector command interface (sync with clk)
     input wire rstart,
     input wire [31:0] rsector,
@@ -63,20 +65,18 @@ module sd_reader #(
 
   reg        sdv1_maybe = 1'b0;
   reg [ 2:0] cmd8_cnt = 0;
-  reg [15:0] rca = 0;
-/// 加载顺序：复位
-  localparam [3:0] CMD0      = 4'd0,
+  /// 加载顺序：复位
+  localparam [3:0] CMD0 = 4'd0,
   /// 判断类型
-                 CMD8      = 4'd1,
-                 /// 
-                 CMD55_41  = 4'd2,
-                 ACMD41    = 4'd3,
-                 /// 获取SD卡CID序列
-                 CMD2      = 4'd4,
-                 /// 获取RCA地址
-                 CMD3      = 4'd5,
-                 // 选中SD卡
-                 CMD7      = 4'd6,
+  CMD8 = 4'd1,
+  /// 
+  CMD55_41 = 4'd2, ACMD41 = 4'd3,
+  /// 获取SD卡CID序列
+  CMD2 = 4'd4,
+  /// 获取RCA地址
+  CMD3 = 4'd5,
+  // 选中SD卡
+  CMD7 = 4'd6,
   /// 复位设置块大小，可以修改此，使得不是单块读
   CMD16 = 4'd7,
   /// 单个块读
