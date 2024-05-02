@@ -62,7 +62,7 @@ module sd_write #(
   );
   reg [7:0] sendByte;  // a byte of sector content
   reg [1:0] card_type;  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
-
+reg [7:0] theCRC;
   localparam [1:0] UNKNOWN = 2'd0,  // SD card type
   SDv1 = 2'd1, SDv2 = 2'd2, SDHCv2 = 2'd3;
 
@@ -102,14 +102,14 @@ module sd_write #(
   reg       SDWritePrepareOk;
   localparam [2:0] writeWait = 3'd0, writeDoing = 3'd1,
   /// 意义不明，准备去掉
-  writeTail = 3'd2,
+  writeCRC = 3'd2,
   //
   writeDone = 3'd3,
   /// 写超时
   writeTimeOut = 3'd4;
   reg [ 2:0] sddat_stat = writeWait;
 
-  //enum logic [2:0] {writeWait, writeDoing, writeTail, writeDone, writeTimeOut} sddat_stat = writeWait;
+  //enum logic [2:0] {writeWait, writeDoing, writeCRC, writeDone, writeTimeOut} sddat_stat = writeWait;
 
   reg [31:0] writeBitIndex = 0;
   assign theWriteBitIndex = writeBitIndex;
@@ -256,7 +256,7 @@ module sd_write #(
               prepareNextByte <= 0;
             end
             if (writeBitIndex >= 512 * 8 - 1) begin
-              sddat_stat <= writeTail;
+              sddat_stat <= writeCRC;
               writeBitIndex <= 0;
               /// 发送结束，结束装载信号
               prepareNextByte <= 0;
@@ -264,10 +264,13 @@ module sd_write #(
               writeBitIndex <= writeBitIndex + 1;
             end
           end
-          writeTail: begin
-
-            sddat0 <= 1'bz;
-            if (writeBitIndex >= 8 * 8 - 1) sddat_stat <= writeDone;
+          writeCRC: begin
+ sddat0 <= theCRC[3'd7-writeBitIndex[2:0]];
+            if (writeBitIndex == 8) begin
+              
+ sddat0 <= 1'bz;
+              sddat_stat <= writeDone;
+            end
             writeBitIndex <= writeBitIndex + 1;
           end
         endcase

@@ -18,20 +18,20 @@ module ReadMBRorDBR #(
 );
   /// 采用边沿触发可能会导致亚稳态，可能原因是SDIO的时钟显然慢于系统时钟，可能该模块工作在20Mhz而SDIO小于之，慢数据抵达快数据产生该问题。
   always @(posedge isEdit) begin
-      case (EditAddress)
-        9'h1C6: begin
-          theBPRDirectory[7:0] <= EditByte;
-        end
-        9'h1C7: begin
-          theBPRDirectory[15:8] <= EditByte;
-        end
-        9'h1C8: begin
-          theBPRDirectory[23:16] <= EditByte;
-        end
-        9'h1C9: begin
-          theBPRDirectory[31:24] <= EditByte;
-        end
-      endcase
+    case (EditAddress)
+      9'h1C6: begin
+        theBPRDirectory[7:0] <= EditByte;
+      end
+      9'h1C7: begin
+        theBPRDirectory[15:8] <= EditByte;
+      end
+      9'h1C8: begin
+        theBPRDirectory[23:16] <= EditByte;
+      end
+      9'h1C9: begin
+        theBPRDirectory[31:24] <= EditByte;
+      end
+    endcase
   end
 endmodule
 /**
@@ -57,43 +57,45 @@ module ReadBPR #(
   /// FAT表一般均为2，在此视为参数。当然，读取也行。
   reg [ 7:0] NumberOfFAT = 0;
   always @(posedge isEdit) begin
-      case (EditAddress)
-        /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
-        'hE: begin
-          ReservedSectors[7:0] <= EditByte;
-        end
-        'hF: begin
-          ReservedSectors[15:8] <= EditByte;
-        end
-        /// 0x10,FAT表的份数
-        'h10: begin
-          NumberOfFAT <= EditByte;
-        end
-        /// 0x24:每FAT扇区数，占用4个字节
-        'h24: begin
-          theLengthOfFAT[7:0] <= EditByte;
-        end
-        'h25: begin
-          theLengthOfFAT[15:8] <= EditByte;
-        end
-        'h26: begin
-          theLengthOfFAT[23:16] <= EditByte;
-        end
-        'h27: begin
-          theLengthOfFAT[31:24] <= EditByte;
-        end
-      endcase
-      //由于读BPR512字节，会保存最终结果
-      theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
-    end
+    case (EditAddress)
+      /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
+      'hE: begin
+        ReservedSectors[7:0] <= EditByte;
+      end
+      'hF: begin
+        ReservedSectors[15:8] <= EditByte;
+      end
+      /// 0x10,FAT表的份数
+      'h10: begin
+        NumberOfFAT <= EditByte;
+      end
+      /// 0x24:每FAT扇区数，占用4个字节
+      'h24: begin
+        theLengthOfFAT[7:0] <= EditByte;
+      end
+      'h25: begin
+        theLengthOfFAT[15:8] <= EditByte;
+      end
+      'h26: begin
+        theLengthOfFAT[23:16] <= EditByte;
+      end
+      'h27: begin
+        theLengthOfFAT[31:24] <= EditByte;
+      end
+    endcase
+    //由于读BPR512字节，会保存最终结果
+    theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
+  end
 endmodule
 /**
 扇区:即SD卡的块，每一个扇区为一块，512字节
 **/
 module FileSystemBlock #(
-    parameter theSizeofBlock = 512,
-    parameter indexWidth = 9,
-    parameter inputFileInformationLength = 8*32*2
+    parameter       theSizeofBlock                 = 512,
+    parameter       indexWidth                     = 9,
+    parameter       inputFileInformationLength     = 8 * 32 * 2,
+    parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
+    parameter       FileNameLength                 = 12
 ) (
     input theRealCLokcForDebug,
     input wire Clock,
@@ -112,12 +114,14 @@ module FileSystemBlock #(
     /// 该信号表示当前扇区没有合适的存放信息处，请加载另一个（下一个）扇区，并且重新给出checkoutFileExit命令搜索合适的位置
     output reg FileNotExist,
     /// 文件保存的地址，注意，因为没有传入参数BPR的偏移地址，所以该值在使用时请加上外面计算的起始地址偏移地址
-    output reg[31:0] fileStartSector,
-    /// 文件变更信息，需要文件信息器提供
-    input wire[inputFileInformationLength-1:0] theChangeFileInput 
+    output reg [31:0] fileStartSector,
+    /// 文件变更信息，需要文件信息器提供，先写低，再写高
+    input wire [inputFileInformationLength-1:0] theChangeFileInput
 );
   reg [7:0] RAM[theSizeofBlock-1:0];
   reg [8:0] theFileSaveAddress;
+  
+  genvar index;
   always @(posedge Clock) begin
     if (InputOrOutput) begin
 
@@ -127,21 +131,29 @@ module FileSystemBlock #(
   assign Byte = RAM[readAddress];
   always @(posedge Clock) begin
     if (checkoutFileExit) begin
-      if ((RAM[1] != 'd0) || (RAM[0] != 'd0)) begin
-/// 添加插入文件逻辑：可以寻找以32的倍数，连续inputFileInformationLength个字节为0x00的扇区地址，作为插入的地址
+      if (/*(RAM[1] != 'd0) || (RAM[0] != 'd0)*/1) begin
+        /// 添加插入文件逻辑：可以寻找以32的倍数，连续inputFileInformationLength个字节为0x00的扇区地址，作为插入的地址
         FileExist <= 1;
+        FileNotExist <= 0;
         /// 理论上新插入的文件位于最后，此时已经可以通过计算之前读过的文件中，利用起始地址与文件长度，得出最大（即最后）的未使用地址，作为本文件的开始地址
-        fileStartSector <= 32'ha001;
+        fileStartSector <= 32'h8001;
       end else begin
-
         FileNotExist <= 1;
       end
-
+    end else if (FileExist && (~FileNotExist)) begin
+      theFileSaveAddress <= 0;
+generate
+  
+  for ( index= 0;index< 64; index=index+1) begin
+    RAM[theFileSaveAddress+index]<=theChangeFileInput[8*index+7:8*index];
+end
+endgenerate
     end else begin
       FileExist <= 0;
       FileNotExist <= 0;
+
     end
-  end/*
+  end  /*
   always @(*)begin
     if()
   end*/

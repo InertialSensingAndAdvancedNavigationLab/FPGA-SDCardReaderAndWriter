@@ -25,26 +25,43 @@ endmodule
 **/
 module CreateShortFileName #(
     
-    parameter [8*8-1:0] FileName    = "Data",
+    parameter [8*8-1:0] FileName    = {"Data",4'h20},
     parameter [3*8-1:0] FileExternName    = "bin",
-    parameter [1*8-1:0] FileSystemType    = 8'b00000000,
-    parameter [1*8-1:0] SystemKeep    = 8'b00000000,
+    parameter [1*8-1:0] FileSystemType    = 8'b00100000,
+    parameter [1*8-1:0] SystemKeep    = 8'h18,
      parameter [2*8-1:0] FileCreateTime    = 8'b00000000,
      parameter [2*8-1:0] FileCreateDate    = 8'b00000000,
+     parameter [2*8-1:0] FileTouchDate    = 8'b00000000,
      parameter [2*8-1:0] FileChangeTime    = 8'b00000000,
      parameter [2*8-1:0] FileChangeDate    = 8'b00000000
      
 
 ) (
     /// 
-    input wire [4*8-2:0] theFileStartSector,
-    input wire [4*8-2:0] FileLength,
+    input wire [4*8-1:0] theFileStartSector,
+    input wire [4*8-1:0] FileLength,
     /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
-    output reg [32*8-1:0]   theFAT32FileName
+    output wire [32*8-1:0]   theFAT32FileName
 );
-    always @(*) begin
-    //  theFAT32FileName[]
-  end
+  genvar index;
+  
+  for ( index= 0;index< 8; index=index+1) begin
+        assign theFAT32FileName[8*index+7:8*index]=FileName[8*(7-index)+7:8*(7-index)];
+end
+  for ( index= 0;index< 3; index=index+1) begin
+        assign theFAT32FileName[8*(index+8)+7:8*(index+8)]=FileName[8*(7-index)+7:8*(7-index)];
+end
+assign theFAT32FileName[8*'hB+7:8*'hB]=FileSystemType;
+assign theFAT32FileName[8*'hC+7:8*'hC]=SystemKeep;
+assign theFAT32FileName[8*'hD+7:8*'hD]=SystemKeep;
+assign theFAT32FileName[8*'hE+15:8*'hE]=FileCreateTime;
+assign theFAT32FileName[8*'h10+15:8*'h10]=FileCreateDate;
+assign theFAT32FileName[8*'h12+15:8*'h12]=FileTouchDate;
+assign theFAT32FileName[8*'h14+15:8*'h14]=theFileStartSector[31:16];
+assign theFAT32FileName[8*'h16+15:8*'h16]=FileChangeTime;
+assign theFAT32FileName[8*'h18+15:8*'h18]=FileChangeDate;
+assign theFAT32FileName[8*'h1A+15:8*'h1A]=theFileStartSector[15:0];
+assign theFAT32FileName[8*'h1C+31:8*'h1C]=FileLength;
 endmodule
 /**
 创建长文件名，长文件名貌似可以叠放，即每个长文件名可以支持26字节长度，即13个字。可以通过输出更多长文件名的形式来延长文件名，其方法是FileType置0延长
@@ -53,14 +70,86 @@ endmodule
 module CreatelongFileName #(
     /// FileType,为8'b00000000表示后面还是长文件名
     parameter [1*8-1:0] FileType     = 8'b01000001,
-    parameter [26*8-1:0] FILE_NAME     = "SaveData.txt"
+    /// 取字符串，即需要包含结尾\0，即实际字符个数+1
+    parameter            FileNameLength = 13    ,
+    //parameter [26*8-1:0] FileName     = {"SaveData.txt",16'd0,((26-FileNameLength)*8)'hFF}
+    parameter [13*8-1:0] FileName     = {"SaveData.txt",8'h0}//,(13-FileNameLength){8'h0}}
 ) (
     /// 短文件的校验值，请事先计算好再将其传入
     input wire [1*8-1:0]verify,
-    output reg [32*8-1:0]   theFAT32FileName
+    output wire [32*8-1:0]   theFAT32FileName
 );
     
-   always @(*) begin
-    //  theFAT32FileName[]
-  end
+  genvar stringIndex;
+  integer      index ;
+assign theFAT32FileName[8*'h0+7:8*'h0]=FileType;
+/*
+    /// 长文件名为UTF16编码，对应于ASCII编码，将其置于高8位置
+  for ( index= 1,stringIndex=0;stringIndex< 5; index=index+2,stringIndex=stringIndex+1) begin
+    /// 前5个字
+    //if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*index+15:8*index]=16'hFF;
+    end*/
+  for ( stringIndex=0;stringIndex< 5; stringIndex=stringIndex+1) begin
+    /// 前5个字
+    //index=(stringIndex*2+1);
+    if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+1)+15:8*(stringIndex*2+1)]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+1)+15:8*(stringIndex*2+1)]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*(stringIndex*2+1)+15:8*(stringIndex*2+1)]=16'hFF;
+    end
+end
+assign theFAT32FileName[8*'hB+7:8*'hB]=8'h0F;
+assign theFAT32FileName[8*'hC+7:8*'hC]=8'h0;
+assign theFAT32FileName[8*'hD+7:8*'hD]=verify;/*
+/// 长文件名中间6个字
+  for ( index= 14,stringIndex=5;stringIndex< 11; index=index+2,stringIndex=stringIndex+1) begin
+   // if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    /*end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*index+15:8*index]=16'hFF;
+    end
+end*/
+/// 长文件名中间6个字
+  for ( stringIndex=5;stringIndex< 11; stringIndex=stringIndex+1) begin
+    // index=(stringIndex*2+4)
+    if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+4)+15:8*(stringIndex*2+4)]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+4)+15:8*(stringIndex*2+4)]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*(stringIndex*2+4)+15:8*(stringIndex*2+4)]=16'hFF;
+    end
+end
+/// 文件起始簇号
+assign theFAT32FileName[8*'h1A+15:8*'h1A]=0;/*
+/// 长文件最后2个字
+  for ( index= 'h1C,stringIndex=11;stringIndex< 13; index=index+2,stringIndex=stringIndex+1) begin
+   // if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*index+15:8*index]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*index+15:8*index]=16'hFF;
+    end*/
+/// 长文件最后2个字
+  for ( stringIndex=11;stringIndex< 13; stringIndex=stringIndex+1) begin
+    // index=(stringIndex*2+6)
+    if(stringIndex<FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+6)+15:8*(stringIndex*2+6)]={FileName[8*(FileNameLength-stringIndex)-1:8*(FileNameLength-stringIndex)-8],8'h00};
+    end else if(stringIndex==FileNameLength) begin
+        assign theFAT32FileName[8*(stringIndex*2+6)+15:8*(stringIndex*2+6)]=16'h00;
+    end else begin
+        assign theFAT32FileName[8*(stringIndex*2+6)+15:8*(stringIndex*2+6)]=16'hFF;
+    end
+end
+
 endmodule

@@ -10,7 +10,7 @@
 //--------------------------------------------------------------------------------------------------------
 module sd_file_write #(
     parameter [26*8-1:0] SaveFileName     = "SaveData.dat", // file name to read, ignore upper and lower case
-    parameter            FileNameLength = 12           , // length of FILE_NAME (in bytes). Since the length of "example.txt" is 11, so here is 11.    
+    parameter            FileNameLength = 12           , // length of FileName (in bytes). Since the length of "example.txt" is 11, so here is 11.    
     parameter [2:0] CLK_DIV = 3'd1,  // when clk =   0~ 25MHz , set CLK_DIV = 3'd1,
                                      // when clk =  25~ 50MHz , set CLK_DIV = 3'd2,
                                      // when clk =  50~100MHz , set CLK_DIV = 3'd3,
@@ -173,22 +173,27 @@ ByteAnalyze ReadDebugger(
       .FileExist(FileExist),
       .FileNotExist(FileNotExist),
       .fileStartSector(fileStartSector),
-      .theChangeFileInput({longFileName, shortFileName})
+      /// 先写的在低，后写的在高
+      .theChangeFileInput({shortFileName,longFileName})
   );
-/*
+
   /// 先保存长文件名，若长文件名的长度超过了13个字符(utf16编码，26字节)，则需要额外配置一个CreatelongFileName，并且修改其位置编号参数
-  CreatelongFileName LongFileName (
+  CreatelongFileName#(
+    .FileName(SaveFileName),
+    .FileNameLength(FileNameLength) 
+    ) LongFileName (
       .verify(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(longFileName)
   );
   /// 数个长文件名后接的短文件名，为包含文件属性的真实文件配置
-  CreateShortFileName ShortFileName (
-      .theFileStartSector(fileStartSector),
-      .fileSectorLength(fileSectorLength),
+  CreateShortFileName#(
+  ) ShortFileName (
+      .theFileStartSector({fileStartSector[22:0],9'd0}),
+      .FileLength(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(shortFileName)
-  );*/
+  );
   /// SD卡状态
   wire [3:0] SDcardState;
   wire [1:0] SDCardType;
@@ -326,7 +331,7 @@ ByteAnalyze ReadDebugger(
           workState <= waitEnoughData;
           if (theNumberOfFIFOData > theOnceSaveSize) begin
             workState <= WriteFIFOData;
-            theSectorAddress <= fileStartSector + fileSectorLength;
+            theSectorAddress <= theBPRDirectory+fileStartSector + fileSectorLength;
             sendStart <= 1;
             /// 从FIFO中预读取一个数据
             requireFIFOOutput <= 1;
