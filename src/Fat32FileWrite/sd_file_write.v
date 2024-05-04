@@ -52,9 +52,10 @@ ByteAnalyze ReadDebugger(
       .probe1(havdGetDataToSend),
       .probe2(theSectorAddress),
       .probe3(sendData),
-      .probe4(writeSDData),
+      .probe4(prepareNextDatak),
       .probe5(requireFIFOOutput),
-      .probe6(FIFOWriteOutData)
+      .probe6(theFileInformationBlockByte),
+      .probe7(autoFileSystemIndex)
   );
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
   reg [3:0] workState;
@@ -174,22 +175,21 @@ ByteAnalyze ReadDebugger(
       .FileNotExist(FileNotExist),
       .fileStartSector(fileStartSector),
       /// 先写的在低，后写的在高
-      .theChangeFileInput({shortFileName,longFileName})
+      .theChangeFileInput({shortFileName, longFileName})
   );
 
   /// 先保存长文件名，若长文件名的长度超过了13个字符(utf16编码，26字节)，则需要额外配置一个CreatelongFileName，并且修改其位置编号参数
-  CreatelongFileName#(
-    .FileName(SaveFileName),
-    .FileNameLength(FileNameLength) 
-    ) LongFileName (
+  CreatelongFileName #(
+      .FileName(SaveFileName),
+      .FileNameLength(FileNameLength)
+  ) LongFileName (
       .verify(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(longFileName)
   );
   /// 数个长文件名后接的短文件名，为包含文件属性的真实文件配置
-  CreateShortFileName#(
-  ) ShortFileName (
-      .theFileStartSector({fileStartSector[22:0],9'd0}),
+  CreateShortFileName #() ShortFileName (
+      .theFileStartSector({fileStartSector[22:0], 9'd0}),
       .FileLength(fileSectorLength),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(shortFileName)
@@ -301,7 +301,7 @@ ByteAnalyze ReadDebugger(
               workState <= initializeFileSystemFinish;
               checkoutFileExit <= 0;
               fileSystemSector <= theSectorAddress;
-              fileSectorLength<=0;
+              fileSectorLength <= 0;
             end else if (FileNotExist) begin
               checkoutFileExit <= 0;
               /// 当前扇区没有符合要求的文件系统，前往下一个扇区寻找
@@ -331,7 +331,7 @@ ByteAnalyze ReadDebugger(
           workState <= waitEnoughData;
           if (theNumberOfFIFOData > theOnceSaveSize) begin
             workState <= WriteFIFOData;
-            theSectorAddress <= theBPRDirectory+fileStartSector + fileSectorLength;
+            theSectorAddress <= theBPRDirectory + fileStartSector + fileSectorLength;
             sendStart <= 1;
             /// 从FIFO中预读取一个数据
             requireFIFOOutput <= 1;
@@ -366,7 +366,7 @@ ByteAnalyze ReadDebugger(
           sendData <= theFileInformationBlockByte;
           havdGetDataToSend <= 1;
           sendStart <= 1;
-          fileSectorLength<=fileSectorLength+1;
+          fileSectorLength <= fileSectorLength + 1;
           workState <= updateFileSystem;
         end
         /// 更新文件系统，工作流程说明：当发送数据至第6位时，调节RAN地址，当发送至第七位时，更新数据，第八位即下一个字节时，自动更新字节
@@ -375,7 +375,7 @@ ByteAnalyze ReadDebugger(
           if (prepareNextData && havdGetDataToSend) begin
             theFileInformationBlockByteAddress = theFileInformationBlockByteAddress + 'd1;
             havdGetDataToSend <= 0;
-          end else if (~(havdGetDataToSend || prepareNextData)) begin
+          end else if ((~havdGetDataToSend) && (~prepareNextData)) begin
             havdGetDataToSend <= 1;
             sendData <= theFileInformationBlockByte;
           end
@@ -442,7 +442,7 @@ ByteAnalyze ReadDebugger(
       .sddat0   (readSDdata),
       .card_type(SDCardType),
       .card_stat(SDcardState),
-      .rca(SDCardRCA),
+      .rca      (SDCardRCA),
       .rstart   (readStart),
       .rsector  (theSectorAddress),
       .rbusy    (readingIsDoing),
@@ -495,15 +495,12 @@ ByteAnalyze ReadDebugger(
       .sddat0              (writeSDData),
       .writeSectorAddress  (theSectorAddress),
       .StartWrite          (sendStart),
-      //.inEnable          (sendDataEnable),
-      //.inEnable          (workState == WriteFIFOData ? 'd1 : 'd0),
       .inByte              (sendData),
-      //.inbyte            ((workState==WriteFIFOData)?FIFOWriteOutData:'hFF),
       .theWriteBitIndex    (autoFileSystemIndex),
       .prepareNextByte     (prepareNextData),
       .writeBlockFinish    (sendFinish),
       .theCard_type        (SDCardType),
-      .theRCA(SDCardRCA),
+      .theRCA              (SDCardRCA),
       .clkdiv              (writeCMDClockSpeed),
       .start               (writeCMDStart),
       .precnt              (writeCMDPrecnt),

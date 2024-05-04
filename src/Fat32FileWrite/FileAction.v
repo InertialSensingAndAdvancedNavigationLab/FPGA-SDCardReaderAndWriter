@@ -91,11 +91,11 @@ endmodule
 扇区:即SD卡的块，每一个扇区为一块，512字节
 **/
 module FileSystemBlock #(
-    parameter       theSizeofBlock                 = 512,
-    parameter       indexWidth                     = 9,
-    parameter       inputFileInformationLength     = 8 * 32 * 2,
+    parameter            theSizeofBlock             = 512,
+    parameter            indexWidth                 = 9,
+    parameter            inputFileInformationLength = 8 * 32 * 2,
     parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
-    parameter       FileNameLength                 = 12
+    parameter            FileNameLength             = 12
 ) (
     input theRealCLokcForDebug,
     input wire Clock,
@@ -120,34 +120,31 @@ module FileSystemBlock #(
 );
   reg [7:0] RAM[theSizeofBlock-1:0];
   reg [8:0] theFileSaveAddress;
-  
-  genvar index;
-  always @(posedge Clock) begin
-    if (InputOrOutput) begin
+
+//  genvar index;
+  assign Byte = RAM[readAddress];
+  always @(posedge Clock) begin: RAMAction
+    integer index;
+     if (InputOrOutput) begin
 
       RAM[writeAddress] <= EditByte;
     end
-  end
-  assign Byte = RAM[readAddress];
-  always @(posedge Clock) begin
-    if (checkoutFileExit) begin
-      if (/*(RAM[1] != 'd0) || (RAM[0] != 'd0)*/1) begin
+    else if (checkoutFileExit) begin
+      if (  /*(RAM[1] != 'd0) || (RAM[0] != 'd0)*/ 1) begin
         /// 添加插入文件逻辑：可以寻找以32的倍数，连续inputFileInformationLength个字节为0x00的扇区地址，作为插入的地址
         FileExist <= 1;
         FileNotExist <= 0;
         /// 理论上新插入的文件位于最后，此时已经可以通过计算之前读过的文件中，利用起始地址与文件长度，得出最大（即最后）的未使用地址，作为本文件的开始地址
         fileStartSector <= 32'h8001;
+        theFileSaveAddress <= 0;
       end else begin
         FileNotExist <= 1;
       end
     end else if (FileExist && (~FileNotExist)) begin
-      theFileSaveAddress <= 0;
-generate
-  
-  for ( index= 0;index< 64; index=index+1) begin
-    RAM[theFileSaveAddress+index]<=theChangeFileInput[8*index+7:8*index];
-end
-endgenerate
+      /*
+      for (index = 0; index < 64; index = index + 1) begin
+        RAM[index+theFileSaveAddress] <= 8'hFF;//theChangeFileInput[8*index+7:8*index];
+     end*/
     end else begin
       FileExist <= 0;
       FileNotExist <= 0;
