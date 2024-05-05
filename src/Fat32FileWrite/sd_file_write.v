@@ -45,7 +45,7 @@ ByteAnalyze ReadDebugger(
   .probe1(inReciveData),
   .probe2(reciveDataAddress),
   .probe3(reciveData),
-  .probe4(sddata)
+  .probe4(sddata)*/
   ByteAnalyze writeDebugger (
       .clk(theRealCLokcForDebug),
       .probe0(clk),
@@ -56,7 +56,7 @@ ByteAnalyze ReadDebugger(
       .probe5(requireFIFOOutput),
       .probe6(theFileInformationBlockByte),
       .probe7(autoFileSystemIndex)
-  );*/
+  );
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
   reg [3:0] workState;
   /// 其最低位为0：完成,提前准备；1：正在进行；
@@ -120,6 +120,7 @@ ByteAnalyze ReadDebugger(
   wire [7:0] FIFOWriteOutData;
   wire [FIFOSizeWidth-1:0] theNumberOfFIFOData;
   reg requireFIFOOutput, havdGetDataToSend;
+  reg [7:0] theExitData;
   /// FIFO先入先出，将串口数据保存，以及以块写入SD卡
   wr_fifo UartInputData (
       .rst(~rstn),  // input rst
@@ -297,7 +298,7 @@ ByteAnalyze ReadDebugger(
           /// 特殊：由于加载文件系统完成环节，拥有写权限，事实上进入了下一阶段，故利用判断是否处于检查文件状态插入加载完成检验
           if (checkoutFileExit) begin
             if (FileExist) begin
-
+              theExitData <= 0;
               workState <= initializeFileSystemFinish;
               checkoutFileExit <= 0;
               fileSystemSector <= theSectorAddress;
@@ -329,7 +330,7 @@ ByteAnalyze ReadDebugger(
           /// 转让文件使用权
           //SDIOReadWrite<=SDIOWrite;
           workState <= waitEnoughData;
-          if (theNumberOfFIFOData > theOnceSaveSize) begin
+          if ((theNumberOfFIFOData > theOnceSaveSize) /*&& isAbleToLaunch*/) begin
             workState <= WriteFIFOData;
             theSectorAddress <= theBPRDirectory + fileStartSector + fileSectorLength;
             sendStart <= 1;
@@ -362,12 +363,17 @@ ByteAnalyze ReadDebugger(
           end
         end
         writeFIFODataEnd: begin
-          theSectorAddress <= fileSystemSector;
-          sendData <= theFileInformationBlockByte;
-          havdGetDataToSend <= 1;
-          sendStart <= 1;
-          fileSectorLength <= fileSectorLength + 1;
-          workState <= updateFileSystem;
+          theExitData <= theExitData + 1;
+          if (theExitData > 8) begin
+            theSectorAddress <= fileSystemSector;
+            sendData <= theFileInformationBlockByte;
+            havdGetDataToSend <= 1;
+            sendStart <= 1;
+            fileSectorLength <= fileSectorLength + 1;
+            workState <= updateFileSystem;
+          end else begin
+            workState<=waitEnoughData;
+          end
         end
         /// 更新文件系统，工作流程说明：当发送数据至第6位时，调节RAN地址，当发送至第七位时，更新数据，第八位即下一个字节时，自动更新字节
         updateFileSystem: begin
@@ -463,6 +469,7 @@ ByteAnalyze ReadDebugger(
   );
   /// 要读/写的扇区地址
   reg  [31:0] theSectorAddress;
+  wire        isAbleToLaunch;
   /// 开始读
   reg         sendStart;
   /// 准备写入的下一个数据，数据已经准备好
@@ -494,6 +501,7 @@ ByteAnalyze ReadDebugger(
       .sdclk               (sdclk),
       .sddat0              (writeSDData),
       .writeSectorAddress  (theSectorAddress),
+      .isAbleToLaunch      (isAbleToLaunch),
       .StartWrite          (sendStart),
       .inByte              (sendData),
       .theWriteBitIndex    (autoFileSystemIndex),

@@ -122,12 +122,22 @@ module FileSystemBlock #(
   reg [8:0] theFileSaveAddress;
 
 //  genvar index;
-  assign Byte = RAM[readAddress];
+  //assign Byte = RAM[readAddress];
+  //assign Byte=(theFileSaveAddress<=readAddress&&readAddress<theFileSaveAddress+64)?(theChangeFileInput[(readAddress-thetheFileSaveAddress)*8]):(RAM[readAddress]);
+  assign Byte[0]=theChangeFileInput[(readAddress<<3+0)];
+  assign Byte[1]=theChangeFileInput[(readAddress<<3+1)];
+  assign Byte[2]=theChangeFileInput[(readAddress<<3+2)];
+  assign Byte[3]=theChangeFileInput[(readAddress<<3+3)];
+  assign Byte[4]=theChangeFileInput[(readAddress<<3+4)];
+  assign Byte[5]=theChangeFileInput[(readAddress<<3+5)];
+  assign Byte[6]=theChangeFileInput[(readAddress<<3+6)];
+  assign Byte[7]=theChangeFileInput[(readAddress<<3+7)];
+  
   always @(posedge Clock) begin: RAMAction
     integer index;
      if (InputOrOutput) begin
 
-      RAM[writeAddress] <= EditByte;
+     // RAM[writeAddress] <= EditByte;
     end
     else if (checkoutFileExit) begin
       if (  /*(RAM[1] != 'd0) || (RAM[0] != 'd0)*/ 1) begin
@@ -141,9 +151,8 @@ module FileSystemBlock #(
         FileNotExist <= 1;
       end
     end else if (FileExist && (~FileNotExist)) begin
-      /*
-      for (index = 0; index < 64; index = index + 1) begin
-        RAM[index+theFileSaveAddress] <= 8'hFF;//theChangeFileInput[8*index+7:8*index];
+      /*for (index = 0; index < 64; index = index + 1) begin
+        RAM[index+theFileSaveAddress] <= theChangeFileInput[8*index];
      end*/
     end else begin
       FileExist <= 0;

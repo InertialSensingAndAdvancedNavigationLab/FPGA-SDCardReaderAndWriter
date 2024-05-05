@@ -27,6 +27,7 @@ module sd_write #(
     // show card status
     input wire [31:0] writeSectorAddress,
     /// Write
+    output reg isAbleToLaunch,
     input wire StartWrite,
     // 输入的数据
     input wire [7:0] inByte,  // a byte of sector content
@@ -63,7 +64,9 @@ module sd_write #(
         sddat_stat,
         sdcmd_stat,
         theCRC,
-        done,sddat0,sdclk
+        done,
+        sddat0,
+        sdclk
       }),
       //.probe2(resparg),
       .probe3(sendByte),
@@ -171,6 +174,7 @@ module sd_write #(
       /// 超时计数器，理论上交接前不会产生超时
       cmd8_cnt              <= 0;
       SDWritePrepareOk      <= 0;
+      isAbleToLaunch<=0;
     end else begin
       set_cmd(0, 0, 0, 0);
       if (sdcmd_stat == inWritting) begin
@@ -181,17 +185,20 @@ module sd_write #(
             sdcmd_stat <= prepareWrite;
           end
           writeDone: begin
+            writeBlockFinish <= 1;
             sdcmd_stat <= checkOut;
           end
           default: begin
-
+            if (~busy) begin
+              set_cmd(1, 256, 13, {rca, 16'h0});
+            end
           end
         endcase
       end  /// 当SDCMD处于空闲状态时，根据当前状态让SDCMD活跃，此时busy=done=0;
       else if (~busy) begin
         case (sdcmd_stat)
           waitOrder: begin
-            writeBlockFinish <= 0;
+            isAbleToLaunch<=1;
             /// SDID空闲，可以使用
             if (StartWrite) begin
               /// 发送CMD13查询卡的状态，发送CMD13查询卡的状态
@@ -207,12 +214,16 @@ module sd_write #(
             /// SD卡准备完成，发送CMD24写块
             set_cmd(1, 256, 13, {rca, 16'h0});
           end
+          /// 空闲状态下查询SD卡状态是否进入rcv，recive状态
+          prepareWrite: begin
+            set_cmd(1, 256, 13, {rca, 16'h0});
+          end
           checkOut: begin
             set_cmd(1, 256, 13, {rca, 16'h0});
           end
           waitSaveFinish: begin
-            writeBlockFinish<=0;
-            sdcmd_stat<=waitOrder;
+            writeBlockFinish <= 0;
+            sdcmd_stat <= waitOrder;
           end
         endcase
       end  /// 当SDCMD处于工作完成状态时，查看是何种状态的任务执行完毕,此时busy为下降沿，done为1个时钟周期高电平
@@ -220,6 +231,7 @@ module sd_write #(
         case (sdcmd_stat)
           /// SD卡准备完成：检查SD卡是否准备完成，若SD卡准备完成则准备进入写块状态
           waitSDReady: begin
+            isAbleToLaunch<=0;
             if (~timeout && ~syntaxe && resparg[8]) begin
               sdcmd_stat <= prepareWrite;
               set_cmd(1, 96, 24,
@@ -227,8 +239,9 @@ module sd_write #(
               theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
             end
           end
+          /// 等待写入：等待SD卡进入recive状态，若进入则开始写入
           prepareWrite: begin
-            if (~timeout && ~syntaxe && resparg[8]  /*resparg[12:9]==4'b0100*/) begin
+            if (~timeout && ~syntaxe && resparg[12:9] == 4'b0110) begin
               sdcmd_stat <= inWritting;
             end
           end
@@ -243,14 +256,14 @@ module sd_write #(
           //校验完成 
           waitSaveFinish: begin
             /// 进入了保存模式
-            if (~timeout && ~syntaxe && resparg[12:9]==4'b0100) begin
+            if (~timeout && ~syntaxe && resparg[12:9] == 4'b0100) begin
               writeBlockFinish <= 1;
             end
           end
           default: begin
             if (~timeout && ~syntaxe) begin
 
-              //set_cmd(1, 256, 13, {rca, 16'h0});
+              set_cmd(1, 256, 13, {rca, 16'h0});
               //sdcmd_stat <= inWritting;
               SDWritePrepareOk <= 1;
             end else begin
@@ -260,13 +273,12 @@ module sd_write #(
             end
           end
         endcase
-      end 
-      else begin
+      end else begin
         /// checkout，此时总线处于忙且非完成状态，若检查到resparg[12:9]==4'd7，即正在保存数据，则发送完毕
-           if (~timeout && ~syntaxe && resparg[12:9]==4'b0111) begin
-            writeBlockFinish<=1;
-            sdcmd_stat <= waitSaveFinish;
-            end
+        if (~timeout && ~syntaxe && resparg[12:9] == 4'b0111) begin
+          writeBlockFinish <= 0;
+          sdcmd_stat <= waitSaveFinish;
+        end
       end
     end
 
@@ -294,17 +306,15 @@ module sd_write #(
           inWritting: begin
             case (sddat_stat)
               writeWait: begin
-                // 等待数个周期
-                writeBitIndex <= writeBitIndex + 1;
-                if (writeBitIndex > 64) begin
+                // 等待数个周期,这里认为当进入传输模式时即完成
+                if (resparg[12:9] == 4'b0110) begin
                   /// 开始发送前先发送bit0。此处有可能是sddata<=1'bz，从而通过if
                   SDDataOut <= 0;
                   SDDataOutEnable <= 1;
                   sddat_stat <= writeDoing;
                   writeBitIndex <= 0;
-                  sendByte <= 8'd0;//inByte;
+                  sendByte <= inByte;
                   prepareNextByte <= 1;
-                  theCRC <= 0;
                 end else begin
                   if(writeBitIndex > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
                     sddat_stat <= writeTimeOut;
@@ -314,10 +324,9 @@ module sd_write #(
               writeDoing: begin
                 /// 下面的代码完成了数据装载，当地址指向00时，此时发送的数据为刚刚装载好的数据
                 SDDataOut <= sendByte[3'd7-writeBitIndex[2:0]];
-                theCRC <= theNextCRC;
                 if (writeBitIndex[2:0] == 3'd7) begin
                   /// 因为数据已经装载，故允许随时准备下一个数据
-                  sendByte <= 8'd0;//inByte;
+                  sendByte <= inByte;
                   /// 这样写是为了立刻装载
                   //SDDataOut <= inByte[3'd7];
                   prepareNextByte <= 1;
@@ -337,7 +346,6 @@ module sd_write #(
               end
               /// 发送2字节CRC校验
               writeCRC: begin
-                theCRC<=inByte;
                 SDDataOut <= theCRC[4'd15-writeBitIndex[3:0]];
                 if (writeBitIndex == 'd16) begin
                   SDDataOut <= 1'b1;
@@ -351,9 +359,9 @@ module sd_write #(
           ///检查数据状态，特点：将读取SDdata0的CRC校验。
           checkOut: begin
             /// 等待计数
-              SDDataOutEnable <= 0;
-            writeBitIndex <= writeBitIndex + 1;
-            if (writeBitIndex > 8*32) begin
+            SDDataOutEnable <= 0;
+            writeBitIndex   <= writeBitIndex + 1;
+            if (writeBitIndex > 8 * 32) begin
               writeBitIndex   <= 0;
               SDDataOutEnable <= 0;
               //sddat_stat <= writeDone;
@@ -367,6 +375,22 @@ module sd_write #(
         endcase
       end
     end
+  end
+
+  always @(posedge sdclk) begin : CRCUpdata
+    case (sddat_stat)
+      writeWait: begin
+        theCRC <= 0;
+      end
+      writeDoing: begin
+          theCRC <= theNextCRC;
+      end
+      writeCRC:begin
+        if(writeBitIndex=='d0)begin
+          theCRC <= theNextCRC;
+        end
+      end
+    endcase
   end
   crc16_d1 CRC (
       .data_in(SDDataOut),
