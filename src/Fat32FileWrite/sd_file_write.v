@@ -45,7 +45,7 @@ ByteAnalyze ReadDebugger(
   .probe1(inReciveData),
   .probe2(reciveDataAddress),
   .probe3(reciveData),
-  .probe4(sddata)*/
+  .probe4(sddata)
   ByteAnalyze writeDebugger (
       .clk(theRealCLokcForDebug),
       .probe0(clk),
@@ -56,7 +56,7 @@ ByteAnalyze ReadDebugger(
       .probe5(requireFIFOOutput),
       .probe6(theFileInformationBlockByte),
       .probe7(autoFileSystemIndex)
-  );
+  );*/
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
   reg [3:0] workState;
   /// 其最低位为0：完成,提前准备；1：正在进行；
@@ -517,6 +517,7 @@ ByteAnalyze ReadDebugger(
   assign readSDdata = SDIOReadWrite ? 1'bz : sddata[0];
   //assign readSDdata = sddata[0];
   assign sddata[0] = SDIOReadWrite ? writeSDData : 1'bz;
+  //assign writeSDData = SDIOReadWrite ? sddata[0] : 1'bz;
   assign SDCMDClockSpeed = SDIOReadWrite ?writeCMDClockSpeed:readCMDClockSpeed;
   assign    SDCMDStart = SDIOReadWrite ?writeCMDStart:readCMDStart;
   assign    SDCMDPrecnt = SDIOReadWrite ?writeCMDPrecnt: readCMDPrecnt;

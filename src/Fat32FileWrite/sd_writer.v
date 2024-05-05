@@ -33,7 +33,7 @@ module sd_write #(
     output wire [31:0] theWriteBitIndex,
     output reg prepareNextByte,
     /// 块写入完成
-    output wire writeBlockFinish,
+    output reg writeBlockFinish,
     /// 接收来自于Reader的初始化
     input wire [1:0] theCard_type,  // 0=UNKNOWN    , 1=SDv1    , 2=SDv2  , 3=SDHCv2
     input wire [15:0] theRCA,
@@ -54,12 +54,22 @@ module sd_write #(
       .clk(theRealCLokcForDebug),
       .probe0(SDDataOut),
       .probe1(busy),
-      //.probe2({resparg[8],resparg[12:9],sddat_stat,sdcmd_stat,}),
-      .probe2(resparg),
+      .probe2({
+        timeout,
+        syntaxe,
+        writeBlockFinish,
+        resparg[8],
+        resparg[12:9],
+        sddat_stat,
+        sdcmd_stat,
+        theCRC,
+        done,sddat0,sdclk
+      }),
+      //.probe2(resparg),
       .probe3(sendByte),
       .probe4(SDDataInput),
       .probe5(SDWritePrepareOk),
-      .probe6(theCRC),
+      .probe6(writeSectorAddress),
       .probe7(writeBitIndex)
   );
 
@@ -104,7 +114,7 @@ module sd_write #(
   // CMD16,设置写入块大小，暂时不使用
   setWriteBlockSize = 4'd7,
   /// 等待命令状态，CM24
-  waitOrder = 4'd0, waitSDReady = 4'd1, prepareWrite = 4'd2, inWritting = 4'd3;
+  waitOrder = 4'd0, waitSDReady = 4'd1, prepareWrite = 4'd2, inWritting = 4'd3, checkOut = 4'd4,waitSaveFinish = 4'd5;
 
   reg [3:0] sdcmd_stat = waitOrder;
   //enum logic [3:0] {CMD0, CMD8, CMD55_41, ACMD41, CMD2, CMD3, CMD7, CMD16, waitOrder, prepareWrite, inWritting} sdcmd_stat = CMD0;
@@ -124,8 +134,8 @@ module sd_write #(
 
   reg [31:0] writeBitIndex = 0;
   assign theWriteBitIndex = writeBitIndex;
-  // assign rbusy            = (sdcmd_stat != waitOrder);
-  assign writeBlockFinish = (sdcmd_stat == inWritting) && (sddat_stat == writeDone);
+  assign rbusy            = (sdcmd_stat != waitOrder);
+  //assign writeBlockFinish = (sdcmd_stat == inWritting) && (sddat_stat == writeDone);
 
 
 
@@ -143,21 +153,7 @@ module sd_write #(
     end
   endtask
 
-
-
-
   always @(posedge clk or negedge rstn)
-    /*if (~rstn) begin
-      set_cmd(0, 0, 0, 0);
-      clkdiv      <= SLOWCLKDIV;
-      theWriteSectorAddress <= 0;
-      rca         <= 0;
-      sdv1_maybe  <= 1'b0;
-      card_type   <= UNKNOWN;
-      sdcmd_stat  <= CMD0;
-      cmd8_cnt    <= 0;
-    end*/
-
     /// 说明：对于SD卡写入器，认为其初始化由SD读取完成，故当SD读卡器复位时，默认继承自写准备状态而非写重置状态
     if (~rstn) begin
       set_cmd(0, 0, 0, 0);
@@ -178,137 +174,196 @@ module sd_write #(
     end else begin
       set_cmd(0, 0, 0, 0);
       if (sdcmd_stat == inWritting) begin
-        if (sddat_stat == writeTimeOut) begin
-          // CM24，写入512字节的块。SD卡应该不需要擦除操作即可写入
-          set_cmd(1, 96, 24, theWriteSectorAddress);
-          sdcmd_stat <= prepareWrite;
-        end else if (sddat_stat == writeDone) sdcmd_stat <= waitOrder;
-      end  /// 当SDCMD处于空闲状态时，根据当前状态让SDCMD活跃
+        case (sddat_stat)
+          writeTimeOut: begin
+            // CM24，写入512字节的块。SD卡应该不需要擦除操作即可写入
+            set_cmd(1, 96, 24, theWriteSectorAddress);
+            sdcmd_stat <= prepareWrite;
+          end
+          writeDone: begin
+            sdcmd_stat <= checkOut;
+          end
+          default: begin
+
+          end
+        endcase
+      end  /// 当SDCMD处于空闲状态时，根据当前状态让SDCMD活跃，此时busy=done=0;
       else if (~busy) begin
         case (sdcmd_stat)
           waitOrder: begin
+            writeBlockFinish <= 0;
             /// SDID空闲，可以使用
-            if (StartWrite) begin/*
+            if (StartWrite) begin
               /// 发送CMD13查询卡的状态，发送CMD13查询卡的状态
               set_cmd(1, 256, 13, {rca, 16'h0});
               ///theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
               sdcmd_stat <= waitSDReady;
               /// 清除SD准备状态，接下来在收到SD卡准备完成的信号后开始写入
-              SDWritePrepareOk <= 0;*/
-              set_cmd(1, 96, 24,
-                      (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
-              theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
-              sdcmd_stat <= prepareWrite;
-            SDWritePrepareOk <= 0;
+              SDWritePrepareOk <= 0;
             end
           end
           /// 发送CMD13查询卡的状态，SDID空闲，可以使用，则发送CMD24，否则再次发送CMD13等待SD空闲
           waitSDReady: begin
             /// SD卡准备完成，发送CMD24写块
-            if (SDWritePrepareOk) begin
-              set_cmd(1, 96, 24,
-                      (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
-              theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
-              sdcmd_stat <= prepareWrite;
-            SDWritePrepareOk <= 0;
-            end  /// SD卡未准备完成。再次发送CMD13查询准备状态
-            else begin
-              set_cmd(1, 256, 13, {rca, 16'h0});
-            end
+            set_cmd(1, 256, 13, {rca, 16'h0});
+          end
+          checkOut: begin
+            set_cmd(1, 256, 13, {rca, 16'h0});
+          end
+          waitSaveFinish: begin
+            writeBlockFinish<=0;
+            sdcmd_stat<=waitOrder;
           end
         endcase
-      end  /// 当SDCMD处于工作完成状态时，查看是何种状态的任务执行完毕
+      end  /// 当SDCMD处于工作完成状态时，查看是何种状态的任务执行完毕,此时busy为下降沿，done为1个时钟周期高电平
       else if (done) begin
         case (sdcmd_stat)
           /// SD卡准备完成：检查SD卡是否准备完成，若SD卡准备完成则准备进入写块状态
-          waitSDReady:
-          /// 第八位为是否准备接收状态
-          if (~timeout && ~syntaxe && resparg[8]) begin
-            
-            SDWritePrepareOk <= 1;
-          end
-          //理论上是prepareWrite使用 
-          default: begin
+          waitSDReady: begin
             if (~timeout && ~syntaxe && resparg[8]) begin
-              sdcmd_stat <= inWritting;
-              SDWritePrepareOk<=1;
+              sdcmd_stat <= prepareWrite;
+              set_cmd(1, 96, 24,
+                      (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9));
+              theWriteSectorAddress <= (card_type == SDHCv2) ? writeSectorAddress : (writeSectorAddress << 9);
             end
-            else begin
-              SDWritePrepareOk<=0;
+          end
+          prepareWrite: begin
+            if (~timeout && ~syntaxe && resparg[8]  /*resparg[12:9]==4'b0100*/) begin
+              sdcmd_stat <= inWritting;
+            end
+          end
+          //理论上不存在，因为没有发送命令，但此时resparg会变为7表示正在保存数据
+          checkOut: begin
+            /// 进入了保存模式
+            if (~timeout && ~syntaxe && resparg[8]  /*resparg[12:9]==4'b0111*/) begin
+              writeBlockFinish <= 1;
+              sdcmd_stat <= waitOrder;
+            end
+          end
+          //校验完成 
+          waitSaveFinish: begin
+            /// 进入了保存模式
+            if (~timeout && ~syntaxe && resparg[12:9]==4'b0100) begin
+              writeBlockFinish <= 1;
+            end
+          end
+          default: begin
+            if (~timeout && ~syntaxe) begin
+
+              //set_cmd(1, 256, 13, {rca, 16'h0});
+              //sdcmd_stat <= inWritting;
+              SDWritePrepareOk <= 1;
+            end else begin
+              SDWritePrepareOk <= 0;
               sdcmd_stat <= waitSDReady;
               //set_cmd(1, 128, 24, theWriteSectorAddress);
             end
           end
         endcase
+      end 
+      else begin
+        /// checkout，此时总线处于忙且非完成状态，若检查到resparg[12:9]==4'd7，即正在保存数据，则发送完毕
+           if (~timeout && ~syntaxe && resparg[12:9]==4'b0111) begin
+            writeBlockFinish<=1;
+            sdcmd_stat <= waitSaveFinish;
+            end
       end
     end
 
 
-  always @(posedge clk or negedge rstn) begin:SDDataAction
-
+  always @(posedge clk or negedge rstn) begin : SDDataAction
     if (~rstn) begin
-      sdclkl  <= 1'b0;
-      sddat_stat <= writeWait;
-      writeBitIndex    <= 0;
-      SDDataOut <= 1'bz;
-      SDDataOutEnable       <= 1'b0;
+      sdclkl          <= 1'b0;
+      sddat_stat      <= writeWait;
+      writeBitIndex   <= 0;
+      SDDataOut       <= 1'bz;
+      SDDataOutEnable <= 1'b0;
     end else begin
       sdclkl <= sdclk;
-      if (/*sdcmd_stat != prepareWrite &&*/ sdcmd_stat != inWritting) begin
-        sddat_stat <= writeWait;
-        writeBitIndex <= 0;
-        SDDataOutEnable<=0;
-      end else if (~sdclkl & sdclk) begin
-        case (sddat_stat)
-          writeWait: begin
-            if (~SDDataInput) begin
-              /// 开始发送前先发送bit0。此处有可能是sddata<=1'bz，从而通过if
-              SDDataOut <= 0;
-              SDDataOutEnable <= 1;
-              sddat_stat <= writeDoing;
-              writeBitIndex <= 0;
-              sendByte <= inByte;
-              prepareNextByte <= 1;
-              theCRC <= 0;
-            end else begin
-              if(writeBitIndex > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
-                sddat_stat <= writeTimeOut;
-              writeBitIndex <= writeBitIndex + 1;
-            end
+      ///下降沿发送数据
+      if (sdclkl & ~sdclk) begin
+        case (sdcmd_stat)
+          /// 发送了cmd24写命令，事实上此时总线没有被占用，所以预拉高
+          prepareWrite: begin
+            sddat_stat <= writeWait;
+            writeBitIndex <= 0;
+            SDDataOut <= 1;
+            SDDataOutEnable <= 1;
           end
-          writeDoing: begin
-            /// 下面的代码完成了数据装载，当地址指向00时，此时发送的数据为刚刚装载好的数据
-            SDDataOut <= sendByte[3'd7-writeBitIndex[2:0]];
-            theCRC <= theNextCRC;
-            if (writeBitIndex[2:0] == 3'd7) begin
-              /// 因为数据已经装载，故允许随时准备下一个数据
-              sendByte <= inByte;
-              /// 这样写是为了立刻装载
-              //SDDataOut <= inByte[3'd7];
-              prepareNextByte <= 1;
-              /// 本数据发送完成，计算本数据CRC,特别的，当发送完512字节，进入写CRC时，会装载最后一次
-              
-            end else begin
-              prepareNextByte <= 0;
-            end
-            if (writeBitIndex >= 512 * 8 - 1) begin
-              sddat_stat <= writeCRC;
-              writeBitIndex <= 0;
-              /// 发送结束，结束装载信号
-              prepareNextByte <= 0;
-            end else begin
-              writeBitIndex <= writeBitIndex + 1;
-            end
+          /// 写入数据状态：根据数据状态进行
+          inWritting: begin
+            case (sddat_stat)
+              writeWait: begin
+                // 等待数个周期
+                writeBitIndex <= writeBitIndex + 1;
+                if (writeBitIndex > 64) begin
+                  /// 开始发送前先发送bit0。此处有可能是sddata<=1'bz，从而通过if
+                  SDDataOut <= 0;
+                  SDDataOutEnable <= 1;
+                  sddat_stat <= writeDoing;
+                  writeBitIndex <= 0;
+                  sendByte <= 8'd0;//inByte;
+                  prepareNextByte <= 1;
+                  theCRC <= 0;
+                end else begin
+                  if(writeBitIndex > 1000000)      // according to SD datasheet, 1ms is enough to wait for DAT result, here, we set timeout to 1000000 clock cycles = 80ms (when SDCLK=12.5MHz)
+                    sddat_stat <= writeTimeOut;
+                  writeBitIndex <= writeBitIndex + 1;
+                end
+              end
+              writeDoing: begin
+                /// 下面的代码完成了数据装载，当地址指向00时，此时发送的数据为刚刚装载好的数据
+                SDDataOut <= sendByte[3'd7-writeBitIndex[2:0]];
+                theCRC <= theNextCRC;
+                if (writeBitIndex[2:0] == 3'd7) begin
+                  /// 因为数据已经装载，故允许随时准备下一个数据
+                  sendByte <= 8'd0;//inByte;
+                  /// 这样写是为了立刻装载
+                  //SDDataOut <= inByte[3'd7];
+                  prepareNextByte <= 1;
+                  /// 本数据发送完成，计算本数据CRC,特别的，当发送完512字节，进入写CRC时，会装载最后一次
+
+                end else begin
+                  prepareNextByte <= 0;
+                end
+                if (writeBitIndex >= 512 * 8 - 1) begin
+                  sddat_stat <= writeCRC;
+                  writeBitIndex <= 0;
+                  /// 发送结束，结束装载信号
+                  prepareNextByte <= 0;
+                end else begin
+                  writeBitIndex <= writeBitIndex + 1;
+                end
+              end
+              /// 发送2字节CRC校验
+              writeCRC: begin
+                theCRC<=inByte;
+                SDDataOut <= theCRC[4'd15-writeBitIndex[3:0]];
+                if (writeBitIndex == 'd16) begin
+                  SDDataOut <= 1'b1;
+                  writeBitIndex <= 0;
+                  sddat_stat <= writeDone;
+                end
+                writeBitIndex <= writeBitIndex + 1;
+              end
+            endcase
           end
-          /// 发送2字节CRC校验
-          writeCRC: begin
-            SDDataOut <= theCRC[4'd15-writeBitIndex[3:0]];
-            if (writeBitIndex == 'd16) begin
-              SDDataOut  <= 1'b1;
-              sddat_stat <= writeDone;
-            end
+          ///检查数据状态，特点：将读取SDdata0的CRC校验。
+          checkOut: begin
+            /// 等待计数
+              SDDataOutEnable <= 0;
             writeBitIndex <= writeBitIndex + 1;
-          end  
+            if (writeBitIndex > 8*32) begin
+              writeBitIndex   <= 0;
+              SDDataOutEnable <= 0;
+              //sddat_stat <= writeDone;
+            end
+
+          end
+          default: begin
+            sddat_stat <= writeWait;
+            writeBitIndex <= 0;
+          end
         endcase
       end
     end
@@ -329,36 +384,36 @@ endmodule
 // convention      : the first serial bit is D[0]
 ////////////////////////////////////////////////////////////////////////////////
 module crc16_d1 (
-    input [0:0] data_in,
-    input [15:0] crc_in,
+    input  [ 0:0] data_in,
+    input  [15:0] crc_in,
     output [15:0] crc_out
-    );
+);
 
-    wire [0:0] d;
-    wire [15:0] c;
-    wire [15:0] newcrc;
+  wire [ 0:0] d;
+  wire [15:0] c;
+  wire [15:0] newcrc;
 
-    assign d = data_in;
-    assign c = crc_in;
+  assign d = data_in;
+  assign c = crc_in;
 
-    assign newcrc[0] = d[0] ^ c[15];
-    assign newcrc[1] = c[0];
-    assign newcrc[2] = c[1];
-    assign newcrc[3] = c[2];
-    assign newcrc[4] = c[3];
-    assign newcrc[5] = d[0] ^ c[4] ^ c[15];
-    assign newcrc[6] = c[5];
-    assign newcrc[7] = c[6];
-    assign newcrc[8] = c[7];
-    assign newcrc[9] = c[8];
-    assign newcrc[10] = c[9];
-    assign newcrc[11] = c[10];
-    assign newcrc[12] = d[0] ^ c[11] ^ c[15];
-    assign newcrc[13] = c[12];
-    assign newcrc[14] = c[13];
-    assign newcrc[15] = c[14];
+  assign newcrc[0] = d[0] ^ c[15];
+  assign newcrc[1] = c[0];
+  assign newcrc[2] = c[1];
+  assign newcrc[3] = c[2];
+  assign newcrc[4] = c[3];
+  assign newcrc[5] = d[0] ^ c[4] ^ c[15];
+  assign newcrc[6] = c[5];
+  assign newcrc[7] = c[6];
+  assign newcrc[8] = c[7];
+  assign newcrc[9] = c[8];
+  assign newcrc[10] = c[9];
+  assign newcrc[11] = c[10];
+  assign newcrc[12] = d[0] ^ c[11] ^ c[15];
+  assign newcrc[13] = c[12];
+  assign newcrc[14] = c[13];
+  assign newcrc[15] = c[14];
 
-    assign crc_out = newcrc;
+  assign crc_out = newcrc;
 
 
 endmodule
