@@ -23,7 +23,9 @@ module sd_file_write #(
     /// FIFO一次性写入数据，要求为一个扇区512的倍数
     parameter theOnceSaveSize='d512,
     /// 多少数据时更新文件
-    parameter updateFileSystemSize='d1
+    parameter updateFileSystemSize='d1,
+    /// 覆盖的文件，扇区偏移绝对值
+    parameter ClusterShift = 5
 ) (
     input  wire       theRealCLokcForDebug,
     // rstn active-low, 1:working, 0:reset
@@ -55,7 +57,7 @@ ByteAnalyze ReadDebugger(
       .probe4(prepareNextDatak),
       .probe5(requireFIFOOutput),
       .probe6(theFileInformationBlockByte),
-      .probe7(autoFileSystemIndex)
+      .probe7({autoFileSystemIndex, theFileInformationBlockByteAddress, verify})
   );
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
   reg [3:0] workState;
@@ -82,7 +84,10 @@ ByteAnalyze ReadDebugger(
   /// 开始写入文件长度修改后的新文件扇区
   updateFileSystem = 'b1011,
   /// 更新文件所在扇区完成
-  updateFileSystemFinish = 'b1100, unKonwError = 'b1111;
+  updateFileSystemFinish = 'b1100,
+  updateFAT='b1101,
+  updateFATFinish='b1110,
+   unKonwError = 'b1111;
 
   /// SDIO总裁模块，决定当前SDIO由读(Output:0)模块控制还是由写模块(Input:1)控制
   wire SDIOReadWrite;
@@ -120,7 +125,6 @@ ByteAnalyze ReadDebugger(
   wire [7:0] FIFOWriteOutData;
   wire [FIFOSizeWidth-1:0] theNumberOfFIFOData;
   reg requireFIFOOutput, havdGetDataToSend;
-  reg [7:0] theExitData;
   /// FIFO先入先出，将串口数据保存，以及以块写入SD卡
   wr_fifo UartInputData (
       .rst(~rstn),  // input rst
@@ -147,12 +151,16 @@ ByteAnalyze ReadDebugger(
   );
   /// BPR信息区，需要先读取MBR信息得到BPR所在扇区。SD卡读卡器所看到的0x00扇区为此扇区，但其在SD卡中地址编号并非0x00。需要额外增加theBPRDirectory得到真实根地址
   wire [31:0] theRootDirectory;
+  wire [7:0] SectorsPerCluster;
+  wire [31:0] RootClusterNumber;
   reg BPREdit;
   ReadBPR theBPRInformationProvider (
       .theRootDirectory(theRootDirectory),
       .isEdit(BPREdit),
       .EditAddress(theReciveDataAddress),
-      .EditByte(theReciveData)
+      .EditByte(theReciveData),
+      .SectorsPerCluster(SectorsPerCluster),
+      .RootClusterNumber(RootClusterNumber)
   );
   /// 文件扇区信息区
   reg isLoadRam;
@@ -163,7 +171,9 @@ ByteAnalyze ReadDebugger(
   reg checkoutFileExit;
   wire FileExist;
   wire FileNotExist;
-  FileSystemBlock theFileInformationKeeper (
+  FileSystemBlock #(
+      .ClusterShift(ClusterShift)
+  ) theFileInformationKeeper (
       .theRealCLokcForDebug(theRealCLokcForDebug),
       .Clock(clk),
       .InputOrOutput(isLoadRam),
@@ -176,24 +186,32 @@ ByteAnalyze ReadDebugger(
       .FileNotExist(FileNotExist),
       .fileStartSector(fileStartSector),
       /// 先写的在低，后写的在高
-      .theChangeFileInput({shortFileName, longFileName})
+      .theChangeFileInput({shortFileName, longFileName}),
+      .fileSystemSector(fileSystemSector),
+      .SectorsPerCluster(SectorsPerCluster),
+      .RootClusterNumber(RootClusterNumber)
   );
-
+  wire [7:0] verify;
   /// 先保存长文件名，若长文件名的长度超过了13个字符(utf16编码，26字节)，则需要额外配置一个CreatelongFileName，并且修改其位置编号参数
   CreatelongFileName #(
       .FileName(SaveFileName),
       .FileNameLength(FileNameLength)
   ) LongFileName (
-      .verify(fileSectorLength),
+      .verify(verify),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
       .theFAT32FileName(longFileName)
   );
   /// 数个长文件名后接的短文件名，为包含文件属性的真实文件配置
-  CreateShortFileName #() ShortFileName (
-      .theFileStartSector({fileStartSector[22:0], 9'd0}),
-      .FileLength(fileSectorLength),
+  CreateShortFileName #(
+      .ClusterShift(ClusterShift)
+  ) ShortFileName (
+      .rstn(SDIOReadWrite),
+      .updateClock(clk),
+      .theFileStartSector(fileStartSector),
+      .FileLength({fileSectorLength[22:0], 9'd0}),
       /// FIFO的特性为高位先出，BRAM的特性为低位先出，请使用BRAM缓存该数据，或修改该数据以配置FIFO高位先出
-      .theFAT32FileName(shortFileName)
+      .theFAT32FileName(shortFileName),
+      .verify(verify)
   );
   /// SD卡状态
   wire [3:0] SDcardState;
@@ -294,14 +312,13 @@ ByteAnalyze ReadDebugger(
         /// 该段见以以reciveData和ReciveEnd的电路模块
         initializeFileSystem: begin
 
+          fileSystemSector <= theSectorAddress;
           readStart <= 0;
           /// 特殊：由于加载文件系统完成环节，拥有写权限，事实上进入了下一阶段，故利用判断是否处于检查文件状态插入加载完成检验
           if (checkoutFileExit) begin
             if (FileExist) begin
-              theExitData <= 0;
               workState <= initializeFileSystemFinish;
               checkoutFileExit <= 0;
-              fileSystemSector <= theSectorAddress;
               fileSectorLength <= 0;
             end else if (FileNotExist) begin
               checkoutFileExit <= 0;
@@ -330,9 +347,10 @@ ByteAnalyze ReadDebugger(
           /// 转让文件使用权
           //SDIOReadWrite<=SDIOWrite;
           workState <= waitEnoughData;
-          if ((theNumberOfFIFOData > theOnceSaveSize) /*&& isAbleToLaunch*/) begin
+          if ((theNumberOfFIFOData > theOnceSaveSize) && isAbleToLaunch) begin
             workState <= WriteFIFOData;
-            theSectorAddress <= theBPRDirectory + fileStartSector + fileSectorLength;
+            /// fileStartSector来自于fileSystemSector，而fileSystemSector计算时已经带上了偏移地址
+            theSectorAddress <= fileStartSector + fileSectorLength;
             sendStart <= 1;
             /// 从FIFO中预读取一个数据
             requireFIFOOutput <= 1;
@@ -360,19 +378,22 @@ ByteAnalyze ReadDebugger(
           if (sendFinish) begin
             workState <= writeFIFODataEnd;
             theFileInformationBlockByteAddress <= 0;
+            fileSectorLength <= fileSectorLength + 1;
           end
         end
         writeFIFODataEnd: begin
-          theExitData <= theExitData + 1;
-          if (theExitData > 8) begin
+          /// 每发送8*512=4k数据，更新一次文件属性
+          if (fileSectorLength[2:0] == 3'd1) begin
             theSectorAddress <= fileSystemSector;
             sendData <= theFileInformationBlockByte;
-            havdGetDataToSend <= 1;
-            sendStart <= 1;
-            fileSectorLength <= fileSectorLength + 1;
-            workState <= updateFileSystem;
+            if (isAbleToLaunch) begin
+              havdGetDataToSend <= 1;
+              sendStart <= 1;
+              workState <= updateFileSystem;
+            end
           end else begin
-            workState<=waitEnoughData;
+            workState <= waitEnoughData;
+            havdGetDataToSend <= 0;
           end
         end
         /// 更新文件系统，工作流程说明：当发送数据至第6位时，调节RAN地址，当发送至第七位时，更新数据，第八位即下一个字节时，自动更新字节
@@ -383,7 +404,13 @@ ByteAnalyze ReadDebugger(
             havdGetDataToSend <= 0;
           end else if ((~havdGetDataToSend) && (~prepareNextData)) begin
             havdGetDataToSend <= 1;
-            sendData <= theFileInformationBlockByte;
+            if (theFileInformationBlockByteAddress < 64) begin
+
+              sendData <= theFileInformationBlockByte;
+            end else begin
+
+              sendData <= 0;
+            end
           end
           if (sendFinish) begin
             workState <= updateFileSystemFinish;

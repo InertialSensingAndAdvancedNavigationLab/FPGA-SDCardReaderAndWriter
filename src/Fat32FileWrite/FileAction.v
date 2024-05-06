@@ -47,7 +47,10 @@ module ReadBPR #(
     /// 编辑的地址（与扇区地址一致）
     input wire [8:0] EditAddress,
     /// 编辑的数据
-    input wire [7:0] EditByte
+    input wire [7:0] EditByte,
+    /// 每簇扇区数，在计算文件起始位置时需要使用
+    output reg [7:0 ]SectorsPerCluster,
+    output reg [31:0] RootClusterNumber
 );
 
   /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
@@ -58,6 +61,9 @@ module ReadBPR #(
   reg [ 7:0] NumberOfFAT = 0;
   always @(posedge isEdit) begin
     case (EditAddress)
+      'hD:begin
+        SectorsPerCluster<= EditByte;
+      end
       /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
       'hE: begin
         ReservedSectors[7:0] <= EditByte;
@@ -81,7 +87,20 @@ module ReadBPR #(
       end
       'h27: begin
         theLengthOfFAT[31:24] <= EditByte;
+      end      
+      'h2C: begin
+        RootClusterNumber[7:0] <= EditByte;
       end
+      'h2D: begin
+        RootClusterNumber[15:8] <= EditByte;
+      end
+      'h2E: begin
+        RootClusterNumber[23:16] <= EditByte;
+      end
+      'h2F: begin
+        RootClusterNumber[31:24] <= EditByte;
+      end
+      
     endcase
     //由于读BPR512字节，会保存最终结果
     theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
@@ -95,7 +114,8 @@ module FileSystemBlock #(
     parameter            indexWidth                 = 9,
     parameter            inputFileInformationLength = 8 * 32 * 2,
     parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
-    parameter            FileNameLength             = 12
+    parameter            FileNameLength             = 12,
+    parameter ClusterShift = 5
 ) (
     input theRealCLokcForDebug,
     input wire Clock,
@@ -116,7 +136,10 @@ module FileSystemBlock #(
     /// 文件保存的地址，注意，因为没有传入参数BPR的偏移地址，所以该值在使用时请加上外面计算的起始地址偏移地址
     output reg [31:0] fileStartSector,
     /// 文件变更信息，需要文件信息器提供，先写低，再写高
-    input wire [inputFileInformationLength-1:0] theChangeFileInput
+    input wire [inputFileInformationLength-1:0] theChangeFileInput,
+    input wire [31:0] fileSystemSector,
+    input wire [7:0] SectorsPerCluster,
+    input wire [31:0] RootClusterNumber
 );
   reg [7:0] RAM[theSizeofBlock-1:0];
   reg [8:0] theFileSaveAddress;
@@ -124,14 +147,15 @@ module FileSystemBlock #(
 //  genvar index;
   //assign Byte = RAM[readAddress];
   //assign Byte=(theFileSaveAddress<=readAddress&&readAddress<theFileSaveAddress+64)?(theChangeFileInput[(readAddress-thetheFileSaveAddress)*8]):(RAM[readAddress]);
-  assign Byte[0]=theChangeFileInput[(readAddress<<3+0)];
-  assign Byte[1]=theChangeFileInput[(readAddress<<3+1)];
-  assign Byte[2]=theChangeFileInput[(readAddress<<3+2)];
-  assign Byte[3]=theChangeFileInput[(readAddress<<3+3)];
-  assign Byte[4]=theChangeFileInput[(readAddress<<3+4)];
-  assign Byte[5]=theChangeFileInput[(readAddress<<3+5)];
-  assign Byte[6]=theChangeFileInput[(readAddress<<3+6)];
-  assign Byte[7]=theChangeFileInput[(readAddress<<3+7)];
+
+  assign Byte[0]=theChangeFileInput[{readAddress,3'h0}];
+  assign Byte[1]=theChangeFileInput[{readAddress,3'h1}];
+  assign Byte[2]=theChangeFileInput[{readAddress,3'h2}];
+  assign Byte[3]=theChangeFileInput[{readAddress,3'h3}];
+  assign Byte[4]=theChangeFileInput[{readAddress,3'h4}];
+  assign Byte[5]=theChangeFileInput[{readAddress,3'h5}];
+  assign Byte[6]=theChangeFileInput[{readAddress,3'h6}];
+  assign Byte[7]=theChangeFileInput[{readAddress,3'h7}];
   
   always @(posedge Clock) begin: RAMAction
     integer index;
@@ -145,7 +169,7 @@ module FileSystemBlock #(
         FileExist <= 1;
         FileNotExist <= 0;
         /// 理论上新插入的文件位于最后，此时已经可以通过计算之前读过的文件中，利用起始地址与文件长度，得出最大（即最后）的未使用地址，作为本文件的开始地址
-        fileStartSector <= 32'h8001;
+        fileStartSector <=fileSystemSector+(ClusterShift-RootClusterNumber)*SectorsPerCluster;
         theFileSaveAddress <= 0;
       end else begin
         FileNotExist <= 1;
