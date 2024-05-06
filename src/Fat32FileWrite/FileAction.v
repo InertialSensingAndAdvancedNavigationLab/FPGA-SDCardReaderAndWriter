@@ -105,8 +105,10 @@ module ReadBPR #(
     //由于读BPR512字节，会保存最终结果
     theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
   end
-endmodule  /**
-扇区:即SD卡的块，每一个扇区为一块，512字节
+endmodule  
+/**
+FAT表扇区:即SD卡的块，每一个扇区为一块，512字节
+需要注意的是，当文件小于一簇时，其不需要访问FAT表，而当文件大于一簇，如1.5簇时，其需要占用向上取整，即2簇数据，因此，当第一次触发更新FA表时，其更新了当前FAT与指向下一扇区结束的FAT。往后每一次更新都是如此，都是N个已用扇区与N+1个要开辟的新扇区
 **/
 module FATListBlock #(
     parameter            theSizeofBlock             = 512,
@@ -158,8 +160,8 @@ reg [indexWidth-1:0] readAddress;
           Byte <= 8'hFF;
         end
       endcase
-    end  /// 前面使用的扇区，应该指向下一个扇区位置
-    else if (((readAddress>>2) - ClusterShift+1) * SectorsPerCluster <= fileSectorLength) begin
+    end  /// 前面使用的扇区，指向下一个扇区位置
+    else if (((readAddress>>2) - ClusterShift+2) * SectorsPerCluster < fileSectorLength) begin
       if (readAddress[1:0] == 0) begin
         Byte <= readAddress[8:2] + 1;
       end else begin
