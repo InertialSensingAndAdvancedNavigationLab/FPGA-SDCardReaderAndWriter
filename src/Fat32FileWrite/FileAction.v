@@ -49,20 +49,20 @@ module ReadBPR #(
     /// 编辑的数据
     input wire [7:0] EditByte,
     /// 每簇扇区数，在计算文件起始位置时需要使用
-    output reg [7:0 ]SectorsPerCluster,
-    output reg [31:0] RootClusterNumber
+    output reg [7:0] SectorsPerCluster,
+    output reg [31:0] RootClusterNumber,
+    /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
+    output reg [15:0] ReservedSectors
 );
 
-  /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
-  reg [15:0] ReservedSectors = 0;
   /// 每FAT扇区数
   reg [31:0] theLengthOfFAT = 0;
   /// FAT表一般均为2，在此视为参数。当然，读取也行。
   reg [ 7:0] NumberOfFAT = 0;
   always @(posedge isEdit) begin
     case (EditAddress)
-      'hD:begin
-        SectorsPerCluster<= EditByte;
+      'hD: begin
+        SectorsPerCluster <= EditByte;
       end
       /// 0x0E，保留扇区数,占用2字节。小端模式，高位在高，低位在地
       'hE: begin
@@ -87,7 +87,7 @@ module ReadBPR #(
       end
       'h27: begin
         theLengthOfFAT[31:24] <= EditByte;
-      end      
+      end
       'h2C: begin
         RootClusterNumber[7:0] <= EditByte;
       end
@@ -100,10 +100,76 @@ module ReadBPR #(
       'h2F: begin
         RootClusterNumber[31:24] <= EditByte;
       end
-      
+
     endcase
     //由于读BPR512字节，会保存最终结果
     theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
+  end
+endmodule  
+/**
+FAT表扇区:即SD卡的块，每一个扇区为一块，512字节
+需要注意的是，当文件小于一簇时，其不需要访问FAT表，而当文件大于一簇，如1.5簇时，其需要占用向上取整，即2簇数据，因此，当第一次触发更新FA表时，其更新了当前FAT与指向下一扇区结束的FAT。往后每一次更新都是如此，都是N个已用扇区与N+1个要开辟的新扇区
+**/
+module FATListBlock #(
+    parameter            theSizeofBlock             = 512,
+    parameter            indexWidth                 = 9,
+    parameter            inputFileInformationLength = 8 * 32 * 2,
+    parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
+    parameter            FileNameLength             = 12,
+    parameter            ClusterShift               = 5
+) (
+    input wire Clock,
+    input wire [indexWidth-1:0] Address,
+    output reg [7:0] Byte,
+    input wire [7:0] SectorsPerCluster,
+    input wire [31:0] fileSectorLength
+);
+reg [indexWidth-1:0] readAddress;
+  always @(posedge Clock) begin : FATAction
+  readAddress<=Address;
+    ///FAT32保留区
+    if (readAddress < 8) begin
+      case (readAddress)
+        'h0: begin
+          Byte <= 8'hF8;
+        end
+        'h3: begin
+          Byte <= 8'h0F;
+        end
+        default: begin
+          Byte <= 8'hFF;
+        end
+      endcase
+    end  /// 非文件锁占用扇区
+    else if (readAddress < ClusterShift*4) begin
+       case (readAddress[1:0])
+        'h3: begin
+          Byte <= 8'h0F;
+        end
+        default: begin
+          Byte <= 8'hFF;
+        end
+    endcase
+    end  /// 最后一个扇区，即下一个开辟的扇区，写入0FFFFFFF
+    else if (((readAddress>>2) - ClusterShift+2) * SectorsPerCluster == fileSectorLength) begin
+      case (readAddress[1:0])
+        'h3: begin
+          Byte <= 8'h0F;
+        end
+        default: begin
+          Byte <= 8'hFF;
+        end
+      endcase
+    end  /// 前面使用的扇区，指向下一个扇区位置
+    else if (((readAddress>>2) - ClusterShift+1) * SectorsPerCluster < fileSectorLength) begin
+      if (readAddress[1:0] == 0) begin
+        Byte <= readAddress[8:2] + 1;
+      end else begin
+        Byte <= 8'h00;
+      end
+    end else begin
+      Byte <= 8'h00;
+    end
   end
 endmodule
 /**
@@ -115,7 +181,7 @@ module FileSystemBlock #(
     parameter            inputFileInformationLength = 8 * 32 * 2,
     parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
     parameter            FileNameLength             = 12,
-    parameter ClusterShift = 5
+    parameter            ClusterShift               = 5
 ) (
     input theRealCLokcForDebug,
     input wire Clock,
@@ -144,26 +210,25 @@ module FileSystemBlock #(
   reg [7:0] RAM[theSizeofBlock-1:0];
   reg [8:0] theFileSaveAddress;
 
-//  genvar index;
+  //  genvar index;
   //assign Byte = RAM[readAddress];
   //assign Byte=(theFileSaveAddress<=readAddress&&readAddress<theFileSaveAddress+64)?(theChangeFileInput[(readAddress-thetheFileSaveAddress)*8]):(RAM[readAddress]);
 
-  assign Byte[0]=theChangeFileInput[{readAddress,3'h0}];
-  assign Byte[1]=theChangeFileInput[{readAddress,3'h1}];
-  assign Byte[2]=theChangeFileInput[{readAddress,3'h2}];
-  assign Byte[3]=theChangeFileInput[{readAddress,3'h3}];
-  assign Byte[4]=theChangeFileInput[{readAddress,3'h4}];
-  assign Byte[5]=theChangeFileInput[{readAddress,3'h5}];
-  assign Byte[6]=theChangeFileInput[{readAddress,3'h6}];
-  assign Byte[7]=theChangeFileInput[{readAddress,3'h7}];
-  
-  always @(posedge Clock) begin: RAMAction
-    integer index;
-     if (InputOrOutput) begin
+  assign Byte[0] = theChangeFileInput[{readAddress, 3'h0}];
+  assign Byte[1] = theChangeFileInput[{readAddress, 3'h1}];
+  assign Byte[2] = theChangeFileInput[{readAddress, 3'h2}];
+  assign Byte[3] = theChangeFileInput[{readAddress, 3'h3}];
+  assign Byte[4] = theChangeFileInput[{readAddress, 3'h4}];
+  assign Byte[5] = theChangeFileInput[{readAddress, 3'h5}];
+  assign Byte[6] = theChangeFileInput[{readAddress, 3'h6}];
+  assign Byte[7] = theChangeFileInput[{readAddress, 3'h7}];
 
-     // RAM[writeAddress] <= EditByte;
-    end
-    else if (checkoutFileExit) begin
+  always @(posedge Clock) begin : RAMAction
+    integer index;
+    if (InputOrOutput) begin
+
+      // RAM[writeAddress] <= EditByte;
+    end else if (checkoutFileExit) begin
       if (  /*(RAM[1] != 'd0) || (RAM[0] != 'd0)*/ 1) begin
         /// 添加插入文件逻辑：可以寻找以32的倍数，连续inputFileInformationLength个字节为0x00的扇区地址，作为插入的地址
         FileExist <= 1;
@@ -183,10 +248,7 @@ module FileSystemBlock #(
       FileNotExist <= 0;
 
     end
-  end  /*
-  always @(*)begin
-    if()
-  end*/
+  end
 endmodule
 /**
 计数器

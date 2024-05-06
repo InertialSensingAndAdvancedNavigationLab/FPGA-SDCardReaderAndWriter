@@ -153,6 +153,7 @@ ByteAnalyze ReadDebugger(
   wire [31:0] theRootDirectory;
   wire [7:0] SectorsPerCluster;
   wire [31:0] RootClusterNumber;
+  wire [15:0] FATSectors;
   reg BPREdit;
   ReadBPR theBPRInformationProvider (
       .theRootDirectory(theRootDirectory),
@@ -160,7 +161,19 @@ ByteAnalyze ReadDebugger(
       .EditAddress(theReciveDataAddress),
       .EditByte(theReciveData),
       .SectorsPerCluster(SectorsPerCluster),
-      .RootClusterNumber(RootClusterNumber)
+      .RootClusterNumber(RootClusterNumber),
+      .ReservedSectors(FATSectors)
+  );
+  wire [31:0] FATByte;
+  reg  [ 8:0] FATAddress;
+  FATListBlock #(
+      .ClusterShift(ClusterShift)
+  ) theFATListUpdater (
+      .Clock(clk),
+      .Address(FATAddress),
+      .Byte(FATByte),
+      .SectorsPerCluster(SectorsPerCluster),
+      .fileSectorLength(fileSectorLength)
   );
   /// 文件扇区信息区
   reg isLoadRam;
@@ -383,7 +396,7 @@ ByteAnalyze ReadDebugger(
         end
         writeFIFODataEnd: begin
           /// 每发送8*512=4k数据，更新一次文件属性
-          if (fileSectorLength[2:0] == 3'd1) begin
+          if (fileSectorLength[2:0] == 3'd0) begin
             theSectorAddress <= fileSystemSector;
             sendData <= theFileInformationBlockByte;
             if (isAbleToLaunch) begin
@@ -413,12 +426,47 @@ ByteAnalyze ReadDebugger(
             end
           end
           if (sendFinish) begin
-            workState <= updateFileSystemFinish;
+            workState  <= updateFileSystemFinish;
+            FATAddress <= 0;
           end
         end
         updateFileSystemFinish: begin
-          workState <= waitEnoughData;
-          havdGetDataToSend <= 0;
+            theSectorAddress <= fileSystemSector;
+          //由于是扇区先增加再检测，因此，第一个扇区完成时为1，当第SectorsPerCluster的N倍个扇区完成时，其取模为0，此时更新FAT表
+          if (fileSectorLength % SectorsPerCluster == 0) begin
+            if (isAbleToLaunch) begin
+              havdGetDataToSend <= 1;
+              sendStart <= 1;
+              workState <= updateFAT;
+              sendData <= FATByte;
+              theSectorAddress<=theBPRDirectory+FATSectors;
+            end
+          end else begin
+            workState <= waitEnoughData;
+            havdGetDataToSend <= 0;
+          end
+        end
+        updateFAT: begin
+          sendStart <= 0;
+          if (prepareNextData && havdGetDataToSend) begin
+            FATAddress = FATAddress + 'd1;
+            havdGetDataToSend <= 0;
+          end else if ((~havdGetDataToSend) && (~prepareNextData)) begin
+            havdGetDataToSend <= 1;
+            sendData <= FATByte;
+          end
+          if (sendFinish) begin
+            workState <= updateFATFinish;
+          end
+        end
+        updateFATFinish: begin
+          /// 当文件长度超过2G时，认为超过长度，系统停止工作
+          if (fileSectorLength > 21'h8FFFFF) begin
+            workState <= unKonwError;
+          end else begin
+            workState <= waitEnoughData;
+            havdGetDataToSend <= 0;
+          end
         end
         unKonwError: begin
 
