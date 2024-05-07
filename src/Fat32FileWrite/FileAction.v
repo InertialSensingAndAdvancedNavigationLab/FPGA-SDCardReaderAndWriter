@@ -126,8 +126,10 @@ module FATListBlock #(
     output reg isReachEnd
 );
 reg [indexWidth-1:0] readAddress;
+reg [indexWidth-1:0] NextFAT;
   always @(posedge Clock) begin : FATAction
   readAddress<=Address;
+  NextFAT<=(Address>>>2)+1;
     ///FAT32保留区
     if (readAddress < 8) begin
       case (readAddress)
@@ -143,7 +145,7 @@ reg [indexWidth-1:0] readAddress;
         end
       endcase
     end  /// 非文件锁占用扇区
-    else if ((readAddress>>2) < ClusterShift) begin
+    else if ((readAddress>>>2) < ClusterShift) begin
        case (readAddress[1:0])
         'h3: begin
           Byte <= 8'h0F;
@@ -156,7 +158,7 @@ reg [indexWidth-1:0] readAddress;
     /// 效果应该是：5簇指向6簇，6簇0FFFFFFF
     /// 5簇：readAddress-ClusterShift=0，而fileSectorLength=1，需要+1，使得
     /// 6簇：readAddress-ClusterShift=1，而fileSectorLength=1；
-    else if (((readAddress>>2) - ClusterShift) * SectorsPerCluster == fileSectorLength) begin
+    else if ((NextFAT - ClusterShift -1) * SectorsPerCluster == fileSectorLength) begin
       case (readAddress[1:0])
         'h3: begin
           Byte <= 8'h0F;
@@ -167,13 +169,16 @@ reg [indexWidth-1:0] readAddress;
         end
       endcase
     end  /// 前面使用的扇区，指向下一个扇区位置
-    else if (((readAddress>>2) - ClusterShift) * SectorsPerCluster < fileSectorLength) begin
+    else if ((NextFAT - ClusterShift-1) * SectorsPerCluster < fileSectorLength) begin
       case (readAddress[1:0])
-        0:Byte <= readAddress[9:2] + 1;
-        1:Byte <= readAddress[19:10];
-        2:Byte <= readAddress[29:20];
-        3:Byte <= readAddress[31:21];
+        0:Byte <= NextFAT[7:0];
+        1:Byte <= NextFAT[15:8];
+        2:Byte <= NextFAT[23:16];
+        3:Byte <= NextFAT[31:24];
     endcase
+    end
+    else begin
+          Byte <= 8'h00;
     end
   end
 endmodule
