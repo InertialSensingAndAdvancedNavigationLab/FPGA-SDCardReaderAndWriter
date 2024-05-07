@@ -112,7 +112,7 @@ FAT表扇区:即SD卡的块，每一个扇区为一块，512字节
 **/
 module FATListBlock #(
     parameter            theSizeofBlock             = 512,
-    parameter            indexWidth                 = 9,
+    parameter            indexWidth                 = 32,
     parameter            inputFileInformationLength = 8 * 32 * 2,
     parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
     parameter            FileNameLength             = 12,
@@ -122,7 +122,8 @@ module FATListBlock #(
     input wire [indexWidth-1:0] Address,
     output reg [7:0] Byte,
     input wire [7:0] SectorsPerCluster,
-    input wire [31:0] fileSectorLength
+    input wire [31:0] fileSectorLength,
+    output reg isReachEnd
 );
 reg [indexWidth-1:0] readAddress;
   always @(posedge Clock) begin : FATAction
@@ -132,6 +133,7 @@ reg [indexWidth-1:0] readAddress;
       case (readAddress)
         'h0: begin
           Byte <= 8'hF8;
+          isReachEnd<=0;
         end
         'h3: begin
           Byte <= 8'h0F;
@@ -158,6 +160,7 @@ reg [indexWidth-1:0] readAddress;
       case (readAddress[1:0])
         'h3: begin
           Byte <= 8'h0F;
+          isReachEnd<=1;
         end
         default: begin
           Byte <= 8'hFF;
@@ -165,13 +168,12 @@ reg [indexWidth-1:0] readAddress;
       endcase
     end  /// 前面使用的扇区，指向下一个扇区位置
     else if (((readAddress>>2) - ClusterShift) * SectorsPerCluster < fileSectorLength) begin
-      if (readAddress[1:0] == 0) begin
-        Byte <= readAddress[8:2] + 1;
-      end else begin
-        Byte <= 8'h00;
-      end
-    end else begin
-      Byte <= 8'h00;
+      case (readAddress[1:0])
+        0:Byte <= readAddress[9:2] + 1;
+        1:Byte <= readAddress[19:10];
+        2:Byte <= readAddress[29:20];
+        3:Byte <= readAddress[31:21];
+    endcase
     end
   end
 endmodule
