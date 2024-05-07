@@ -61,6 +61,8 @@ ByteAnalyze ReadDebugger(
   );
   /// 初始化initialize的状态,以最高位为分界线，当最高位为0时，处于初始化-读状态，当最高位为1时，处于工作-写状态
   reg [3:0] workState;
+  reg[15:0] resetCount;
+  wire  resetSD=resetCount[15];
   /// 其最低位为0：完成,提前准备；1：正在进行；
   localparam [3:0] inReset = 'b0000,
   /// 初始化SD卡驱动
@@ -236,6 +238,7 @@ ByteAnalyze ReadDebugger(
     /// 系统复位
     if (rstn == 0) begin
       workState <= inReset;
+      resetCount<=15'h8000;
     end  /// 系统初始化
     else begin
       case (workState)
@@ -246,11 +249,13 @@ ByteAnalyze ReadDebugger(
           havdGetDataToSend <= 0;
           sendDataEnable <= 0;
           readStart <= 0;
+          resetCount<=resetCount+1;
           /// 工作见reader模块，当获取到了SD卡类型后，设置系统参数，进入等待状态，认为SDIO初始化完成，SDcardState稳定状态位于8，CMD17
           if (readingIsDoing == 0) begin
             /// 初始化完成，接下来进行读取MBR，在此给出一个周期的读使能信号
             workState <= initializeMBRorDBR;
             readStart <= 1;
+            resetCount<=15'hFFFF;
           end
         end
         initializeMBRorDBR: begin
@@ -433,7 +438,7 @@ ByteAnalyze ReadDebugger(
         updateFileSystemFinish: begin
             theSectorAddress <= fileSystemSector;
           //由于是扇区先增加再检测，因此，第一个扇区完成时为1，当第SectorsPerCluster的N倍个扇区完成时，其取模为0，此时更新FAT表
-          if (fileSectorLength % SectorsPerCluster == 0) begin
+          if ((fileSectorLength % SectorsPerCluster) == 0) begin
             if (isAbleToLaunch) begin
               havdGetDataToSend <= 1;
               sendStart <= 1;

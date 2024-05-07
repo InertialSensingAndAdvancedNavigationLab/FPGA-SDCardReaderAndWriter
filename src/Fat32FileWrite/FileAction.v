@@ -141,7 +141,7 @@ reg [indexWidth-1:0] readAddress;
         end
       endcase
     end  /// 非文件锁占用扇区
-    else if (readAddress < ClusterShift*4) begin
+    else if ((readAddress>>2) < ClusterShift) begin
        case (readAddress[1:0])
         'h3: begin
           Byte <= 8'h0F;
@@ -150,8 +150,11 @@ reg [indexWidth-1:0] readAddress;
           Byte <= 8'hFF;
         end
     endcase
-    end  /// 最后一个扇区，即下一个开辟的扇区，写入0FFFFFFF
-    else if (((readAddress>>2) - ClusterShift+2) * SectorsPerCluster == fileSectorLength) begin
+    end  /// 最后一个扇区，即下一个开辟的扇区，写入0FFFFFFF，测测来是+3，我不理解，大概原因可能是，以第一次触发为例：
+    /// 效果应该是：5簇指向6簇，6簇0FFFFFFF
+    /// 5簇：readAddress-ClusterShift=0，而fileSectorLength=1，需要+1，使得
+    /// 6簇：readAddress-ClusterShift=1，而fileSectorLength=1；
+    else if (((readAddress>>2) - ClusterShift) * SectorsPerCluster == fileSectorLength) begin
       case (readAddress[1:0])
         'h3: begin
           Byte <= 8'h0F;
@@ -161,7 +164,7 @@ reg [indexWidth-1:0] readAddress;
         end
       endcase
     end  /// 前面使用的扇区，指向下一个扇区位置
-    else if (((readAddress>>2) - ClusterShift+2) * SectorsPerCluster < fileSectorLength) begin
+    else if (((readAddress>>2) - ClusterShift) * SectorsPerCluster < fileSectorLength) begin
       if (readAddress[1:0] == 0) begin
         Byte <= readAddress[8:2] + 1;
       end else begin
