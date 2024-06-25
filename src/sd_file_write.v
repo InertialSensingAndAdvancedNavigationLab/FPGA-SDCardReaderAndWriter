@@ -171,14 +171,19 @@ module sd_file_write #(
                  .fileSectorLength(fileSectorLength),
                  .isReachEnd(isReachEnd)
                );
+
   wire NeedUpdateFat;
+  wire  [31:0]FatStartSector;
+  wire [31:0] FATStartAddress;
   UpdateFatStartAddress #(
     .ClusterShift(ClusterShift)
   ) theFATUpdateAddress(
     .clock(clk),
     .SectorsPerCluster(SectorsPerCluster),
     .fileSectorLength(fileSectorLength),
-    .NeedUpdateFat(NeedUpdateFat)
+    .NeedUpdateFat(NeedUpdateFat),
+    .FatStartSector(FatStartSector),
+    .StartAddress(FATStartAddress)
   );
   /// 文件扇区信息区
   reg isLoadRam;
@@ -545,7 +550,6 @@ module sd_file_write #(
           if (sendFinish)
           begin
             workState  <= updateFileSystemFinish;
-            FATAddress <= 0;
           end
         end
         updateFileSystemFinish:
@@ -560,7 +564,8 @@ module sd_file_write #(
               sendStart <= 1;
               workState <= updateFAT;
               sendData <= FATByte;
-              theSectorAddress <= theBPRDirectory + FATSectors;
+              theSectorAddress <= theBPRDirectory + FATSectors+FatStartSector;
+              FATAddress <= FATStartAddress;
             end
           end
           else
