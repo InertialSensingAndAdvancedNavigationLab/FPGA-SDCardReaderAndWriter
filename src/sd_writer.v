@@ -50,32 +50,6 @@ module sd_write #(
     input wire syntaxe,
     input wire [31:0] resparg
 );
-/*
-  ByteAnalyze writeDebugger (
-      .clk(theRealCLokcForDebug),
-      .probe0(SDDataOut),
-      .probe1(busy),
-      .probe2({
-        theCRC,
-        timeout,
-        syntaxe,
-        writeBlockFinish,
-        resparg[8],
-        resparg[12:9],
-        sddat_stat,
-        sdcmd_stat,
-        done,
-        sddat0,
-        sdclk,isAbleToLaunch
-      }),
-      //.probe2(resparg),
-      .probe3(sendByte),
-      .probe4(SDDataInput),
-      .probe5(SDWritePrepareOk),
-      .probe6(writeSectorAddress),
-      .probe7(writeBitIndex)
-  );*/
-
   reg SDDataOutEnable;
   reg SDDataOut = 1'b1;
 
@@ -93,10 +67,7 @@ module sd_write #(
   localparam [15:0] FASTCLKDIV = (16'd1 << CLK_DIV);
   localparam [15:0] SLOWCLKDIV = FASTCLKDIV * (SIMULATE ? 16'd5 : 16'd48);
 
-  reg        start = 1'b0;
   reg [15:0] precnt = 0;
-  reg [ 5:0] cmd = 0;
-  reg [31:0] arg = 0;
   reg [15:0] clkdiv = SLOWCLKDIV;
   reg [31:0] theWriteSectorAddress = 0;
 

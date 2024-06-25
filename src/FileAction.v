@@ -50,6 +50,7 @@ module ReadBPR #(
     input wire [7:0] EditByte,
     /// 每簇扇区数，在计算文件起始位置时需要使用
     output reg [7:0] SectorsPerCluster,
+    /// 根文件簇所在位置
     output reg [31:0] RootClusterNumber,
     /// 保留扇区数，位于BPB(BIOS Parameter Block)中。该项数据建议从0号扇区中读取，以获得更加兼容性。
     output reg [15:0] ReservedSectors
@@ -104,82 +105,6 @@ module ReadBPR #(
     endcase
     //由于读BPR512字节，会保存最终结果
     theRootDirectory <= ReservedSectors + (theLengthOfFAT * NumberOfFAT);
-  end
-endmodule  
-/**
-FAT表扇区:即SD卡的块，每一个扇区为一块，512字节
-需要注意的是，当文件小于一簇时，其不需要访问FAT表，而当文件大于一簇，如1.5簇时，其需要占用向上取整，即2簇数据，因此，当第一次触发更新FA表时，其更新了当前FAT与指向下一扇区结束的FAT。往后每一次更新都是如此，都是N个已用扇区与N+1个要开辟的新扇区
-**/
-module FATListBlock #(
-    parameter            theSizeofBlock             = 512,
-    parameter            indexWidth                 = 32,
-    parameter            inputFileInformationLength = 8 * 32 * 2,
-    parameter [26*8-1:0] SaveFileName               = "SaveData.dat",
-    parameter            FileNameLength             = 12,
-    parameter            ClusterShift               = 5
-) (
-    input wire Clock,
-    input wire [indexWidth-1:0] Address,
-    output reg [7:0] Byte,
-    input wire [7:0] SectorsPerCluster,
-    input wire [31:0] fileSectorLength,
-    output reg isReachEnd
-);
-reg [indexWidth-1:0] readAddress;
-reg [indexWidth-1:0] NextFAT;
-  always @(posedge Clock) begin : FATAction
-  readAddress<=Address;
-  NextFAT<=(Address>>>2)+1;
-    ///FAT32保留区
-    if (readAddress < 8) begin
-      case (readAddress)
-        'h0: begin
-          Byte <= 8'hF8;
-          isReachEnd<=0;
-        end
-        'h3: begin
-          Byte <= 8'h0F;
-        end
-        default: begin
-          Byte <= 8'hFF;
-        end
-      endcase
-    end  /// 非文件锁占用扇区
-    else if ((readAddress>>>2) < ClusterShift) begin
-       case (readAddress[1:0])
-        'h3: begin
-          Byte <= 8'h0F;
-        end
-        default: begin
-          Byte <= 8'hFF;
-        end
-    endcase
-    end  /// 最后一个扇区，即下一个开辟的扇区，写入0FFFFFFF，测测来是+3，我不理解，大概原因可能是，以第一次触发为例：
-    /// 效果应该是：5簇指向6簇，6簇0FFFFFFF
-    /// 5簇：readAddress-ClusterShift=0，而fileSectorLength=1，需要+1，使得
-    /// 6簇：readAddress-ClusterShift=1，而fileSectorLength=1；
-    else if ((NextFAT - ClusterShift -1) * SectorsPerCluster == fileSectorLength) begin
-      case (readAddress[1:0])
-        'h3: begin
-          Byte <= 8'h0F;
-          isReachEnd<=1;
-        end
-        default: begin
-          Byte <= 8'hFF;
-        end
-      endcase
-    end  /// 前面使用的扇区，指向下一个扇区位置
-    else if ((NextFAT - ClusterShift-1) * SectorsPerCluster < fileSectorLength) begin
-      case (readAddress[1:0])
-        0:Byte <= NextFAT[7:0];
-        1:Byte <= NextFAT[15:8];
-        2:Byte <= NextFAT[23:16];
-        3:Byte <= NextFAT[31:24];
-    endcase
-    end
-    else begin
-          Byte <= 8'h00;
-    end
   end
 endmodule
 /**
